@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- getExternalFilesDir(DIRECTORY_DOWNLOADS) — respaldo para Android 9 (API 28) o
+         menor, donde el Kardex se guarda en almacenamiento propio de la app en vez de
+         la carpeta pública de Descargas (así se evita pedir WRITE_EXTERNAL_STORAGE). -->
+    <external-files-path name="descargas_kardex" path="Download/" />
+</paths>
