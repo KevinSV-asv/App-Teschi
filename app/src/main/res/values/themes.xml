@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.AppTeschi" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/app_canvas</item>
+        <item name="android:statusBarColor">@color/app_canvas</item>
+        <item name="android:navigationBarColor">@color/app_canvas</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:colorBackground">@color/app_canvas</item>
+    </style>
+</resources>

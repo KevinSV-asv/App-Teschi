@@ -1,0 +1,30 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+.kotlin/
+
+# Archivos de candado temporal de Office (Word/Excel/PowerPoint)
+~$*
+
+# Volcados y capturas temporales de pruebas con el teléfono (adb):
+# sesion.xml trae el token de sesión real del alumno; las capturas, datos académicos.
+/sesion.xml
+/ui_*.xml
+/*_check.png
+
+# Scripts de arranque locales de esta PC (rutas absolutas y IPs de la red doméstica).
+# El backend real corre en el servidor; ver el manual técnico del vault.
+/arrancar-backend-teschi.bat
+/iniciar-appteschi.ps1
