@@ -6,7 +6,6 @@ import com.example.appteschi.data.SolicitudReinscripcionAdmin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
@@ -28,7 +27,7 @@ interface ReinscripcionAdminApi {
  * exigen sesión de administrador (ver DEC-020).
  */
 object ReinscripcionAdminService : ReinscripcionAdminApi {
-    private val client = OkHttpClient()
+    private val client = ClienteHttp.nuevo()
 
     override suspend fun observaciones(matricula: String): Result<List<ObservacionReglamento>> =
         withContext(Dispatchers.IO) {

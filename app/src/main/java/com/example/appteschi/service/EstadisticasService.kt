@@ -3,7 +3,6 @@ package com.example.appteschi.service
 import com.example.appteschi.core.config.ApiConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 
@@ -24,7 +23,7 @@ data class EstadisticasResumen(
 
 /** Agregados para las gráficas del panel de administrador — ver GET /api/estadisticas. */
 object EstadisticasService {
-    private val client = OkHttpClient()
+    private val client = ClienteHttp.nuevo()
 
     suspend fun obtener(): Result<EstadisticasResumen> = withContext(Dispatchers.IO) {
         try {

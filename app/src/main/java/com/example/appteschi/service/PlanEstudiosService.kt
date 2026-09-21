@@ -6,7 +6,6 @@ import com.example.appteschi.data.GrupoInfo
 import com.example.appteschi.data.MateriaPlan
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 
@@ -24,7 +23,7 @@ interface PlanEstudiosApi {
  * curricular, no dato personal de un alumno.
  */
 object PlanEstudiosService : PlanEstudiosApi {
-    private val client = OkHttpClient()
+    private val client = ClienteHttp.nuevo()
 
     override suspend fun carreras(): Result<List<CarreraCatalogo>> = withContext(Dispatchers.IO) {
         try {

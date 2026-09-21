@@ -4,7 +4,6 @@ import com.example.appteschi.core.config.ApiConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
@@ -34,7 +33,7 @@ data class MateriaCalificacion(
  * administrador (ver DEC-020).
  */
 object CalificacionesAdminService {
-    private val client = OkHttpClient()
+    private val client = ClienteHttp.nuevo()
 
     suspend fun obtener(matricula: String): Result<Pair<AlumnoCalificaciones, List<MateriaCalificacion>>> =
         withContext(Dispatchers.IO) {

@@ -47,5 +47,5 @@ object SesionAlumno {
         response
     }
 
-    val client: OkHttpClient by lazy { OkHttpClient.Builder().addInterceptor(vigilante).build() }
+    val client: OkHttpClient by lazy { OkHttpClient.Builder().addInterceptor(TraduceErroresDeRed).addInterceptor(vigilante).build() }
 }

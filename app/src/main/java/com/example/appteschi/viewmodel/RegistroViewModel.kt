@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import com.example.appteschi.service.TraduceErroresDeRed
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -29,6 +30,7 @@ class RegistroViewModel(
     private val registroApiUrl: String = ApiConfig.registro,
     // Timeouts ampliados + logging para diagnosticar problemas de conexión con la API
     private val client: OkHttpClient = OkHttpClient.Builder()
+        .addInterceptor(TraduceErroresDeRed)
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .writeTimeout(15, TimeUnit.SECONDS)

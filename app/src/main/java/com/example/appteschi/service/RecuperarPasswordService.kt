@@ -4,7 +4,6 @@ import com.example.appteschi.core.config.ApiConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
@@ -25,7 +24,7 @@ interface RecuperarPasswordApi {
  * código, ver DEC-025.
  */
 object RecuperarPasswordService : RecuperarPasswordApi {
-    private val client = OkHttpClient()
+    private val client = ClienteHttp.nuevo()
 
     override suspend fun solicitar(matricula: String): Result<String> = withContext(Dispatchers.IO) {
         try {

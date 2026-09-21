@@ -4,7 +4,6 @@ import com.example.appteschi.core.config.ApiConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
@@ -34,7 +33,7 @@ interface RemoteOtpService {
  * responde; nunca conoce el código correcto.
  */
 object OtpService : RemoteOtpService {
-    private val client = OkHttpClient()
+    private val client = ClienteHttp.nuevo()
 
     override suspend fun enviar(tipo: TipoCuenta, identificador: String, correo: String, ticket: String): Result<Unit> =
         withContext(Dispatchers.IO) {

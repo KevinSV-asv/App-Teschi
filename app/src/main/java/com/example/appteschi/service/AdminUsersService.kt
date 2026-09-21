@@ -6,7 +6,6 @@ import com.example.appteschi.data.UserRole
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
@@ -14,7 +13,7 @@ import org.json.JSONObject
 private val USERS_API_URL get() = ApiConfig.usuarios
 
 object AdminUsersService {
-    private val client = OkHttpClient()
+    private val client = ClienteHttp.nuevo()
 
     suspend fun fetch(): Result<List<ManagedUser>> = withContext(Dispatchers.IO) {
         try {

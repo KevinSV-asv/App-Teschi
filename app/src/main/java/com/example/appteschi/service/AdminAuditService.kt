@@ -3,7 +3,6 @@ package com.example.appteschi.service
 import com.example.appteschi.core.config.ApiConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.net.URLEncoder
@@ -20,7 +19,7 @@ data class RemoteAuditEvent(
 )
 
 object AdminAuditService {
-    private val client = OkHttpClient()
+    private val client = ClienteHttp.nuevo()
 
     suspend fun fetch(perfilMatricula: String): Result<List<RemoteAuditEvent>> = withContext(Dispatchers.IO) {
         try {

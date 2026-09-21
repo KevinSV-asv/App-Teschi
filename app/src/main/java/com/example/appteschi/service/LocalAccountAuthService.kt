@@ -4,7 +4,6 @@ import com.example.appteschi.core.config.ApiConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
@@ -23,7 +22,7 @@ interface CuentaAuthService {
 object LocalAccountAuthService : CuentaAuthService {
     data class Account(val matricula: String, val nombre: String, val ticket: String)
 
-    private val client = OkHttpClient()
+    private val client = ClienteHttp.nuevo()
 
     override suspend fun autenticar(matricula: String, password: String): Result<Account> = withContext(Dispatchers.IO) {
         try {

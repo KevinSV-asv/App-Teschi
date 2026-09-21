@@ -4,7 +4,6 @@ import com.example.appteschi.core.config.ApiConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
@@ -22,7 +21,7 @@ interface AdminAuthService {
 object AdminAccountAuthService : AdminAuthService {
     data class Account(val usuario: String, val nombre: String, val rol: String, val ticket: String)
 
-    private val client = OkHttpClient()
+    private val client = ClienteHttp.nuevo()
 
     override suspend fun autenticar(usuario: String, password: String): Result<Account> = withContext(Dispatchers.IO) {
         try {

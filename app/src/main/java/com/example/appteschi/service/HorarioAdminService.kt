@@ -5,7 +5,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
@@ -47,7 +46,7 @@ interface HorarioAdminApi {
  * sube un archivo (multipart) en vez de JSON.
  */
 object HorarioAdminService : HorarioAdminApi {
-    private val client = OkHttpClient()
+    private val client = ClienteHttp.nuevo()
     private val MEDIA_XLSX =
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet".toMediaType()
 
