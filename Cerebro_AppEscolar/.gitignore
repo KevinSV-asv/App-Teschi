@@ -1,0 +1,29 @@
+# Secretos y configuración local: cada quien crea su .env a partir de .env.example
+.env
+.env.*
+!.env.example
+
+# Dependencias (se reinstalan con npm ci)
+node_modules/
+
+# Entorno de Postman con la API key local (usar Postman_Environment_AppTeschi.example.json)
+/07_BACKEND/AppTeschi.Api/Postman_Environment_AppTeschi.json
+
+# Estado personal de Obsidian y plugins (main.js pesa 5 MB y cada quien instala los suyos)
+/.obsidian/workspace.json
+/.obsidian/workspaces.json
+/.obsidian/community-plugins.json
+/.obsidian/plugins/
+/.obsidian/cache
+
+# Herramientas de agentes de IA locales
+/.opencode/
+/.agents/
+/.claude/
+/.copilot/
+
+# Respaldos y temporales
+*.bak
+~$*
+.DS_Store
+Thumbs.db
