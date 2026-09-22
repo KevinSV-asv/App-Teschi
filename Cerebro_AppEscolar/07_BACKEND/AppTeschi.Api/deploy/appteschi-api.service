@@ -1,0 +1,27 @@
+[Unit]
+Description=AppTESCHI API (Node.js)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=appteschi
+Group=appteschi
+WorkingDirectory=/opt/appteschi/api
+EnvironmentFile=/opt/appteschi/api/.env
+Environment=NODE_ENV=production
+ExecStart=/opt/node/bin/node server.js
+Restart=always
+RestartSec=3
+MemoryMax=512M
+
+# Endurecimiento: el servicio solo lee su carpeta y no necesita escribir nada.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

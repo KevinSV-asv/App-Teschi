@@ -1,0 +1,138 @@
+{
+  "info": {
+    "name": "AppTeschi API",
+    "description": "Colección para probar la API de AppTeschi, validar SQL Server y sincronizar usuarios completos",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:4000",
+      "type": "string"
+    },
+    {
+      "key": "api_key",
+      "value": "{{api_key}}",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "health"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Sincronizar usuarios completos",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "[\n  {\n    \"username\": \"20240001\",\n    \"name\": \"Jose Garcia Lopez\",\n    \"correo\": \"alumno@gmail.com\",\n    \"correoInstitucional\": \"20240001@teschi.edu.mx\",\n    \"carrera\": \"Ingenieria en Sistemas\",\n    \"role\": \"ALUMNO\"\n  },\n  {\n    \"username\": \"admin\",\n    \"name\": \"Administrador local\",\n    \"correo\": \"admin@gmail.com\",\n    \"correoInstitucional\": \"admin@teschi.edu.mx\",\n    \"carrera\": \"Administracion\",\n    \"role\": \"ADMINISTRADOR\"\n  }\n]"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/usuarios/sync",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "usuarios",
+            "sync"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Consultar usuarios",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-api-key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/usuarios",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "usuarios"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Consultar catalogos de registro",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/catalogos/registro",
+          "host": ["{{base_url}}"],
+          "path": ["api", "catalogos", "registro"]
+        }
+      }
+    },
+    {
+      "name": "Crear cuenta AppTESCHI",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"}
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"matricula\": \"20240060\",\n  \"nombres\": \"Ana Maria\",\n  \"apellidoPaterno\": \"Lopez\",\n  \"apellidoMaterno\": \"Garcia\",\n  \"fechaNacimiento\": \"2002-05-18\",\n  \"sistema\": \"ESCOLARIZADO\",\n  \"carrera\": \"ISC\",\n  \"equivalencias\": false,\n  \"password\": \"Registro2026\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/registro",
+          "host": ["{{base_url}}"],
+          "path": ["api", "registro"]
+        }
+      }
+    },
+    {
+      "name": "Iniciar sesión cuenta AppTESCHI",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"}
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"matricula\": \"20240060\",\n  \"password\": \"Registro2026\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/auth/cuenta",
+          "host": ["{{base_url}}"],
+          "path": ["api", "auth", "cuenta"]
+        }
+      }
+    }
+  ]
+}

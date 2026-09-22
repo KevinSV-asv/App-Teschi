@@ -28,3 +28,19 @@ local.properties
 # El backend real corre en el servidor; ver el manual técnico del vault.
 /arrancar-backend-teschi.bat
 /iniciar-appteschi.ps1
+
+# Bóveda Cerebro_AppEscolar (Obsidian): secretos y estado local, cada quien crea el suyo
+Cerebro_AppEscolar/**/.env
+Cerebro_AppEscolar/**/.env.*
+!Cerebro_AppEscolar/**/.env.example
+Cerebro_AppEscolar/**/node_modules/
+Cerebro_AppEscolar/07_BACKEND/AppTeschi.Api/Postman_Environment_AppTeschi.json
+Cerebro_AppEscolar/.obsidian/workspace.json
+Cerebro_AppEscolar/.obsidian/workspaces.json
+Cerebro_AppEscolar/.obsidian/community-plugins.json
+Cerebro_AppEscolar/.obsidian/plugins/
+Cerebro_AppEscolar/.obsidian/cache
+Cerebro_AppEscolar/.opencode/
+Cerebro_AppEscolar/.agents/
+Cerebro_AppEscolar/.claude/
+Cerebro_AppEscolar/.copilot/
