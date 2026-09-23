@@ -63,6 +63,7 @@
 | 5 | [[05_RecuperarPassword]] | `Routes.RECUPERAR_PASS` | ✅ Real — solo cuentas propias, código al correo ya registrado (nunca a uno escrito en el momento) |
 | 8 | [[08_Horarios]] | `Routes.ADMIN_HORARIOS` (admin) | ✅ Real — carga por Excel, ver DEC-029 |
 | — | Kardex (alumno) | `Routes.KARDEX` | ✅ Real — mismo `/api/mi-historial`; exportación a PDF real |
+| 9 | [[09_Login_SIIA_por_Tipo]] | `Routes.LOGIN` + `Routes.DOCENTE_DASHBOARD` (propuesta) | 📝 Plan por fases — login unificado con la API oficial del SIIA (solo `login.ashx`), cada usuario a su dashboard según su tipo; asistencia fuera de alcance (22/09/2026) |
 
 ---
 

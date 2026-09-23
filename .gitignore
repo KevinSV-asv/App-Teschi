@@ -34,6 +34,7 @@ Cerebro_AppEscolar/**/.env
 Cerebro_AppEscolar/**/.env.*
 !Cerebro_AppEscolar/**/.env.example
 Cerebro_AppEscolar/**/node_modules/
+Cerebro_AppEscolar/**/privado_no_subir_a_git/
 Cerebro_AppEscolar/07_BACKEND/AppTeschi.Api/Postman_Environment_AppTeschi.json
 Cerebro_AppEscolar/.obsidian/workspace.json
 Cerebro_AppEscolar/.obsidian/workspaces.json

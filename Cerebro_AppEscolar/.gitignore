@@ -27,3 +27,6 @@ node_modules/
 ~$*
 .DS_Store
 Thumbs.db
+
+# Datos reales de personas: nunca se versionan en ningún repositorio (ver DEC-032/DEC-035).
+/04_BASE_DATOS/privado_no_subir_a_git/
