@@ -37,6 +37,14 @@ data class AuthUiState(
     val intentosFallidos: Int = 0,
     val bloqueado: Boolean = false,
     val irAlDashboard: Boolean = false,
+    /** true si la cuenta requiere cambio de contraseña */
+    val cambioPw: Boolean = false,
+    /** Correo enmascarado del SIIA (ej. "ke****@gmail.com") — se muestra en paso OTP */
+    val correoSiiaEnmascarado: String = "",
+    /** true si el alumno del SIIA no tiene carrera mapeada */
+    val siiaAlumnoPendiente: Boolean = false,
+    /** true si el usuario del SIIA no tiene correo registrado */
+    val siiaRequiereCorreo: Boolean = false,
     /** Token de sesión (de administrador o de alumno, según tipoPendiente) —
      *  se llena tras un verificarOtp exitoso (ver DEC-020 y DEC-030). */
     val tokenSesion: String? = null
@@ -90,6 +98,38 @@ class AuthViewModel(
                         ticket = resultado.ticket
                     )
 
+                    is LoginResultado.SiiaRequiereOtp -> avanzarAVerificacion(
+                        tipo = resultado.tipo,
+                        identificador = resultado.identificador,
+                        nombre = resultado.nombre,
+                        ticket = resultado.ticket,
+                        correoSiiaEnmascarado = resultado.correoEnmascarado,
+                        cambioPw = resultado.cambioPw
+                    )
+
+                    is LoginResultado.SiiaAlumnoPendiente -> {
+                        _uiState.update {
+                            it.copy(
+                                cargando = false,
+                                mensajeCarga = null,
+                                siiaAlumnoPendiente = true,
+                                nombreValidado = resultado.nombre
+                            )
+                        }
+                    }
+
+                    is LoginResultado.SiiaRequiereCorreo -> {
+                        _uiState.update {
+                            it.copy(
+                                cargando = false,
+                                mensajeCarga = null,
+                                siiaRequiereCorreo = true,
+                                tipoPendiente = resultado.tipo,
+                                matriculaValidada = resultado.identificador
+                            )
+                        }
+                    }
+
                     is LoginResultado.Rechazado -> {
                         AuditTrail.record(matriculaLimpia, "Acceso rechazado", "Credenciales inválidas")
                         _uiState.update {
@@ -105,7 +145,15 @@ class AuthViewModel(
         }
     }
 
-    private fun avanzarAVerificacion(tipo: TipoCuenta, identificador: String, nombre: String, ticket: String, rol: String? = null) {
+    private fun avanzarAVerificacion(
+        tipo: TipoCuenta,
+        identificador: String,
+        nombre: String,
+        ticket: String,
+        rol: String? = null,
+        correoSiiaEnmascarado: String = "",
+        cambioPw: Boolean = false
+    ) {
         _uiState.update {
             it.copy(
                 cargando = false,
@@ -116,6 +164,10 @@ class AuthViewModel(
                 ticket = ticket,
                 nombreValidado = nombre,
                 rolValidado = rol,
+                correoSiiaEnmascarado = correoSiiaEnmascarado,
+                cambioPw = cambioPw,
+                siiaAlumnoPendiente = false,
+                siiaRequiereCorreo = false,
                 otpEnviado = false,
                 intentosFallidos = 0,
                 bloqueado = false,
@@ -207,6 +259,58 @@ class AuthViewModel(
                     onFallo(mensaje)
                 }
             )
+        }
+    }
+
+    fun loginSiia(usuario: String, password: String) {
+        if (usuario.isBlank() || password.isBlank()) {
+            _uiState.update { it.copy(errorLogin = "Ingresa tu usuario y contraseña del SIIA") }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    cargando = true,
+                    mensajeCarga = "Verificando en el SIIA…",
+                    errorLogin = null,
+                    siiaAlumnoPendiente = false,
+                    siiaRequiereCorreo = false
+                )
+            }
+            when (val resultado = authRepository.loginSiia(usuario, password)) {
+                is LoginResultado.SiiaRequiereOtp -> avanzarAVerificacion(
+                    tipo = resultado.tipo,
+                    identificador = resultado.identificador,
+                    nombre = resultado.nombre,
+                    ticket = resultado.ticket,
+                    correoSiiaEnmascarado = resultado.correoEnmascarado,
+                    cambioPw = resultado.cambioPw
+                )
+                is LoginResultado.SiiaAlumnoPendiente ->
+                    _uiState.update {
+                        it.copy(
+                            cargando = false,
+                            mensajeCarga = null,
+                            siiaAlumnoPendiente = true,
+                            nombreValidado = resultado.nombre
+                        )
+                    }
+                is LoginResultado.SiiaRequiereCorreo ->
+                    _uiState.update {
+                        it.copy(
+                            cargando = false,
+                            mensajeCarga = null,
+                            siiaRequiereCorreo = true,
+                            tipoPendiente = resultado.tipo,
+                            matriculaValidada = resultado.identificador
+                        )
+                    }
+                is LoginResultado.Rechazado ->
+                    _uiState.update {
+                        it.copy(cargando = false, mensajeCarga = null, errorLogin = resultado.mensaje)
+                    }
+                else -> _uiState.update { it.copy(cargando = false, mensajeCarga = null) }
+            }
         }
     }
 

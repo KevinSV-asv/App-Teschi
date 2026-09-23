@@ -8,7 +8,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 
-enum class TipoCuenta { ALUMNO, ADMINISTRADOR }
+enum class TipoCuenta { ALUMNO, ADMINISTRADOR, DOCENTE }
 
 /** Permite sustituir OtpService por un fake en tests. */
 interface RemoteOtpService {
@@ -40,7 +40,7 @@ object OtpService : RemoteOtpService {
             try {
                 val body = JSONObject().apply {
                     put("tipo", tipo.name)
-                    put(if (tipo == TipoCuenta.ADMINISTRADOR) "usuario" else "matricula", identificador)
+                    put(if (tipo == TipoCuenta.ADMINISTRADOR || tipo == TipoCuenta.DOCENTE) "usuario" else "matricula", identificador)
                     put("correo", correo)
                     put("ticket", ticket)
                 }
@@ -55,7 +55,7 @@ object OtpService : RemoteOtpService {
             try {
                 val body = JSONObject().apply {
                     put("tipo", tipo.name)
-                    put(if (tipo == TipoCuenta.ADMINISTRADOR) "usuario" else "matricula", identificador)
+                    put(if (tipo == TipoCuenta.ADMINISTRADOR || tipo == TipoCuenta.DOCENTE) "usuario" else "matricula", identificador)
                     put("codigo", codigo)
                     put("ticket", ticket)
                 }

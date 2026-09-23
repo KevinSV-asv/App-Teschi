@@ -97,6 +97,7 @@ object Routes {
     const val INTERSEMESTRAL   = "intersemestral"
     const val KARDEX           = "kardex"
     const val RECUPERAR_PASS   = "recuperar_pass"
+    const val DOCENTE_DASHBOARD    = "docente_dashboard"
     const val REGISTRO         = "registro"
     const val PERFIL_ALUMNO    = "perfil_alumno"
 
@@ -202,6 +203,11 @@ fun AppNavigation() {
 
             // ── Registro de nuevo usuario (formulario completo) ───────────────
             composable(Routes.REGISTRO) { RegistroScreen(navController) }
+
+            // ── Panel de docente (Fase 3 — placeholder) ──────────────────────
+            composable(Routes.DOCENTE_DASHBOARD) {
+                ModuleDetailScreen("Docente", navController)
+            }
         }
 
         if (mostrarBarraInferior) {

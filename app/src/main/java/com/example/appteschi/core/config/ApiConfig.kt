@@ -59,6 +59,7 @@ object ApiConfig {
     val registro get() = "$BASE_URL/api/registro"
     val authCuenta get() = "$BASE_URL/api/auth/cuenta"
     val authAdministrador get() = "$BASE_URL/api/auth/administrador"
+    val authSiia get() = "$BASE_URL/api/auth/siia"
     val otpEnviar get() = "$BASE_URL/api/otp/enviar"
     val otpVerificar get() = "$BASE_URL/api/otp/verificar"
     val usuarios get() = "$BASE_URL/api/usuarios"

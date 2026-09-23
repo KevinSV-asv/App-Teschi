@@ -7,6 +7,9 @@ import com.example.appteschi.service.CuentaAuthService
 import com.example.appteschi.service.LocalAccountAuthService
 import com.example.appteschi.service.OtpService
 import com.example.appteschi.service.RemoteOtpService
+import com.example.appteschi.service.SiiaAccountAuthService
+import com.example.appteschi.service.SiiaAuthService
+import com.example.appteschi.service.SiiaLoginResultado
 import com.example.appteschi.service.TipoCuenta
 
 /** Resultado de intentar iniciar sesión — decide a qué paso pasa la UI. */
@@ -24,6 +27,22 @@ sealed class LoginResultado {
 
     /** Cuenta propia de AppTESCHI (alumno) validada — falta el paso de verificación por OTP. */
     data class CuentaPropiaRequiereOtp(val matricula: String, val nombre: String, val ticket: String) : LoginResultado()
+
+    /** Alumno o docente del SIIA validado — falta verificación OTP. */
+    data class SiiaRequiereOtp(
+        val tipo: TipoCuenta,
+        val identificador: String,
+        val nombre: String,
+        val ticket: String,
+        val correoEnmascarado: String,
+        val cambioPw: Boolean
+    ) : LoginResultado()
+
+    /** Alumno del SIIA cuya carrera no tiene equivalencia mapeada aún. */
+    data class SiiaAlumnoPendiente(val nombre: String) : LoginResultado()
+
+    /** Alumno o docente del SIIA sin correo registrado. */
+    data class SiiaRequiereCorreo(val tipo: TipoCuenta, val identificador: String) : LoginResultado()
 
     /** Ninguna fuente aceptó las credenciales. */
     data class Rechazado(val mensaje: String) : LoginResultado()
@@ -59,6 +78,7 @@ sealed class LoginResultado {
 class AuthRepository(
     private val adminAuthService: AdminAuthService = AdminAccountAuthService,
     private val cuentaAuthService: CuentaAuthService = LocalAccountAuthService,
+    private val siiaAuthService: SiiaAuthService = SiiaAccountAuthService,
     private val otpService: RemoteOtpService = OtpService
 ) {
     suspend fun iniciarSesion(matricula: String, password: String): LoginResultado {
@@ -100,6 +120,22 @@ class AuthRepository(
 
     suspend fun verificarOtpRemoto(tipo: TipoCuenta, identificador: String, codigo: String, ticket: String): Result<String?> =
         otpService.verificar(tipo, identificador, codigo, ticket)
+
+    /** Login via SIIA (POST /api/auth/siia). Devuelve el resultado apropiado para la UI. */
+    suspend fun loginSiia(usuario: String, password: String): LoginResultado =
+        when (val r = siiaAuthService.login(usuario, password)) {
+            is SiiaLoginResultado.RequiereOtp -> LoginResultado.SiiaRequiereOtp(
+                tipo = r.tipo,
+                identificador = r.identificador,
+                nombre = r.nombre,
+                ticket = r.ticket,
+                correoEnmascarado = r.correoEnmascarado,
+                cambioPw = r.cambioPw
+            )
+            is SiiaLoginResultado.CuentaPendiente -> LoginResultado.SiiaAlumnoPendiente(r.nombre)
+            is SiiaLoginResultado.RequiereCorreo  -> LoginResultado.SiiaRequiereCorreo(r.tipo, r.identificador)
+            is SiiaLoginResultado.Error           -> LoginResultado.Rechazado(r.mensaje)
+        }
 
     private fun esAlumnoPruebaLocal(matricula: String, password: String): Boolean =
         matricula.equals("alumno", ignoreCase = true) && password == "alumno"

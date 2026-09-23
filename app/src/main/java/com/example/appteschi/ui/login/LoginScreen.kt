@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Pin
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,6 +64,7 @@ fun LoginScreen(navController: NavController) {
     var matricula by remember { mutableStateOf("") }
     var password  by remember { mutableStateOf("") }
     var correoOtp by remember { mutableStateOf("") }
+    var modeSiia  by remember { mutableStateOf(false) }  // true = pestaña SIIA
     var codigo2FA by remember { mutableStateOf("") }
     // Si el usuario ya tiene un código de un envío anterior (p. ej. la app se
     // fue a segundo plano y regresó a este paso desde cero), no debería tener
@@ -81,10 +83,10 @@ fun LoginScreen(navController: NavController) {
     // irAlDashboard se activa desde AuthViewModel cuando el login es exitoso sin OTP
     LaunchedEffect(uiState.irAlDashboard) {
         if (uiState.irAlDashboard) {
-            val destino = if (UserSession.esAdministrador) {
-                Routes.ADMIN_DASHBOARD
-            } else {
-                Routes.DASHBOARD
+            val destino = when {
+                UserSession.esAdministrador -> Routes.ADMIN_DASHBOARD
+                UserSession.esDocente       -> Routes.DOCENTE_DASHBOARD
+                else                        -> Routes.DASHBOARD
             }
             navController.navigate(destino) {
                 popUpTo(Routes.LOGIN) { inclusive = true }
@@ -130,28 +132,46 @@ fun LoginScreen(navController: NavController) {
                         .padding(horizontal = 20.dp, vertical = 18.dp)
                 ) {
                     when (uiState.paso) {
-                        LoginPaso.CREDENCIALES -> CredencialesSection(
-                            matricula = matricula,
-                            password = password,
-                            errorLogin = uiState.errorLogin,
-                            cargando = uiState.cargando,
-                            mensajeCarga = uiState.mensajeCarga,
-                            onMatriculaChange = {
-                                matricula = it
-                                authViewModel.limpiarErrores()
-                            },
-                            onPasswordChange = {
-                                password = it
-                                authViewModel.limpiarErrores()
-                            },
-                            onOlvidoClick = { navController.navigate(Routes.RECUPERAR_PASS) },
-                            onIniciarSesion = {
-                                authViewModel.validarCredenciales(matricula, password)
+                        LoginPaso.CREDENCIALES -> {
+                            if (uiState.siiaAlumnoPendiente) {
+                                CuentaPendienteSection(
+                                    nombre = uiState.nombreValidado,
+                                    onVolver = { authViewModel.volverAlLogin() }
+                                )
+                            } else {
+                                CredencialesSection(
+                                    matricula = matricula,
+                                    password = password,
+                                    modeSiia = modeSiia,
+                                    errorLogin = uiState.errorLogin,
+                                    cargando = uiState.cargando,
+                                    mensajeCarga = uiState.mensajeCarga,
+                                    onMatriculaChange = {
+                                        matricula = it
+                                        authViewModel.limpiarErrores()
+                                    },
+                                    onPasswordChange = {
+                                        password = it
+                                        authViewModel.limpiarErrores()
+                                    },
+                                    onModeChange = { siia ->
+                                        modeSiia = siia
+                                        matricula = ""
+                                        password = ""
+                                        authViewModel.limpiarErrores()
+                                    },
+                                    onOlvidoClick = { navController.navigate(Routes.RECUPERAR_PASS) },
+                                    onIniciarSesion = {
+                                        if (modeSiia) authViewModel.loginSiia(matricula, password)
+                                        else authViewModel.validarCredenciales(matricula, password)
+                                    }
+                                )
                             }
-                        )
+                        }
 
                         LoginPaso.VERIFICACION -> VerificacionSection(
                             correoOtp = correoOtp,
+                            correoEnmascaradoSiia = uiState.correoSiiaEnmascarado,
                             codigo2FA = codigo2FA,
                             correoEnviado = uiState.otpEnviado,
                             mostrarCampoCodigo = uiState.otpEnviado || tengoCodigo,
@@ -181,17 +201,24 @@ fun LoginScreen(navController: NavController) {
                                 authViewModel.verificarOtp(
                                     codigoIngresado = codigo2FA,
                                     onExito = { tokenSesion ->
-                                        val esAdmin = uiState.tipoPendiente == TipoCuenta.ADMINISTRADOR
+                                        val esAdmin    = uiState.tipoPendiente == TipoCuenta.ADMINISTRADOR
+                                        val esDocente  = uiState.tipoPendiente == TipoCuenta.DOCENTE
                                         UserSession.establecer(
-                                            matricula = uiState.matriculaValidada,
-                                            correoOtp = correoOtp.trim().lowercase(),
+                                            matricula     = uiState.matriculaValidada,
+                                            correoOtp     = correoOtp.trim().lowercase(),
                                             nombreCompleto = uiState.nombreValidado,
                                             esAdministrador = esAdmin,
-                                            adminToken = if (esAdmin) tokenSesion else null,
-                                            alumnoToken = if (esAdmin) null else tokenSesion,
-                                            rol = uiState.rolValidado
+                                            esDocente     = esDocente,
+                                            adminToken    = if (esAdmin) tokenSesion else null,
+                                            docenteToken  = if (esDocente) tokenSesion else null,
+                                            alumnoToken   = if (!esAdmin && !esDocente) tokenSesion else null,
+                                            rol           = uiState.rolValidado
                                         )
-                                        val destino = if (esAdmin) Routes.ADMIN_DASHBOARD else Routes.DASHBOARD
+                                        val destino = when {
+                                            esAdmin   -> Routes.ADMIN_DASHBOARD
+                                            esDocente -> Routes.DOCENTE_DASHBOARD
+                                            else      -> Routes.DASHBOARD
+                                        }
                                         navController.navigate(destino) {
                                             popUpTo(Routes.LOGIN) { inclusive = true }
                                         }
@@ -279,11 +306,13 @@ private fun ConfigServidorDialog(onCerrar: () -> Unit) {
 private fun CredencialesSection(
     matricula: String,
     password: String,
+    modeSiia: Boolean,
     errorLogin: String?,
     cargando: Boolean,
     mensajeCarga: String?,
     onMatriculaChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
+    onModeChange: (Boolean) -> Unit,
     onOlvidoClick: () -> Unit,
     onIniciarSesion: () -> Unit
 ) {
@@ -294,20 +323,47 @@ private fun CredencialesSection(
         fontWeight = FontWeight.Bold,
         color = GreenPrimary
     )
-    Text(
-        text = "Ingresa tus credenciales académicas",
-        fontSize = 13.sp,
-        color = TextMuted,
-        modifier = Modifier.padding(top = 2.dp, bottom = 14.dp)
-    )
+
+    // Pestañas: Cuenta propia / SIIA
+    val tabs = listOf("Cuenta AppTESCHI", "SIIA")
+    TabRow(
+        selectedTabIndex = if (modeSiia) 1 else 0,
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        contentColor = GreenPrimary,
+        modifier = Modifier.padding(bottom = 12.dp, top = 6.dp)
+    ) {
+        tabs.forEachIndexed { index, titulo ->
+            Tab(
+                selected = (modeSiia && index == 1) || (!modeSiia && index == 0),
+                onClick = { onModeChange(index == 1) },
+                text = { Text(titulo, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+            )
+        }
+    }
+
+    if (!modeSiia) {
+        Text(
+            text = "Ingresa tus credenciales de AppTESCHI",
+            fontSize = 13.sp,
+            color = TextMuted,
+            modifier = Modifier.padding(bottom = 14.dp)
+        )
+    } else {
+        Text(
+            text = "Ingresa tus credenciales del SIIA escolar",
+            fontSize = 13.sp,
+            color = TextMuted,
+            modifier = Modifier.padding(bottom = 14.dp)
+        )
+    }
 
     LoginField(
-        label = "Matrícula",
+        label = if (modeSiia) "Usuario SIIA" else "Matrícula",
         value = matricula,
         onValueChange = onMatriculaChange,
-        placeholder = "Ej. 202400123",
+        placeholder = if (modeSiia) "Número de control" else "Ej. 202400123",
         icon = Icons.Default.Badge,
-        keyboardType = KeyboardType.Text   // Text permite letras — necesario para "admin"
+        keyboardType = KeyboardType.Text
     )
     Spacer(modifier = Modifier.height(10.dp))
     LoginField(
@@ -370,6 +426,7 @@ private fun CredencialesSection(
 @Composable
 private fun VerificacionSection(
     correoOtp: String,
+    correoEnmascaradoSiia: String = "",
     codigo2FA: String,
     correoEnviado: Boolean,
     /** true si ya debe verse el campo de código — por haberlo enviado en esta
@@ -418,12 +475,21 @@ private fun VerificacionSection(
         color = GreenPrimary,
         modifier = Modifier.padding(top = 4.dp)
     )
-    Text(
-        text = "Te enviaremos un código a tu correo",
-        fontSize = 13.sp,
-        color = TextMuted,
-        modifier = Modifier.padding(top = 2.dp, bottom = 14.dp)
-    )
+    if (correoEnmascaradoSiia.isNotBlank()) {
+        Text(
+            text = "Código al correo: $correoEnmascaradoSiia",
+            fontSize = 13.sp,
+            color = TextMuted,
+            modifier = Modifier.padding(top = 2.dp, bottom = 14.dp)
+        )
+    } else {
+        Text(
+            text = "Te enviaremos un código a tu correo",
+            fontSize = 13.sp,
+            color = TextMuted,
+            modifier = Modifier.padding(top = 2.dp, bottom = 14.dp)
+        )
+    }
 
     LoginField(
         label = "Correo electrónico",
@@ -503,6 +569,40 @@ private fun VerificacionSection(
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth()
         )
+    }
+}
+
+
+@Composable
+private fun CuentaPendienteSection(
+    nombre: String,
+    onVolver: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Cuenta pendiente de activación",
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            color = GreenPrimary,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = "Hola${if (nombre.isNotBlank()) ", $nombre" else ""}. Tu cuenta del SIIA fue reconocida, " +
+                "pero tu carrera aún no está mapeada en AppTESCHI. " +
+                "Comunícate con el administrador escolar para activarla.",
+            fontSize = 14.sp,
+            color = TextMuted,
+            textAlign = TextAlign.Center,
+            lineHeight = 20.sp
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        OutlinedButton(onClick = onVolver, modifier = Modifier.fillMaxWidth()) {
+            Text("Volver al inicio de sesión")
+        }
     }
 }
 

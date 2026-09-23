@@ -10,6 +10,8 @@ private const val CLAVE_ES_ADMIN = "esAdministrador"
 private const val CLAVE_ADMIN_TOKEN = "adminToken"
 private const val CLAVE_ALUMNO_TOKEN = "alumnoToken"
 private const val CLAVE_ROL = "rol"
+private const val CLAVE_ES_DOCENTE = "esDocente"
+private const val CLAVE_DOCENTE_TOKEN = "docenteToken"
 
 /**
  * Sesión del usuario autenticado. Los campos de administrador (adminToken,
@@ -33,6 +35,8 @@ object UserSession {
         adminToken = p.getString(CLAVE_ADMIN_TOKEN, null)
         alumnoToken = p.getString(CLAVE_ALUMNO_TOKEN, null)
         rol = p.getString(CLAVE_ROL, null)
+        esDocente = p.getBoolean(CLAVE_ES_DOCENTE, false)
+        docenteToken = p.getString(CLAVE_DOCENTE_TOKEN, null)
     }
 
     var matricula: String = ""
@@ -56,6 +60,12 @@ object UserSession {
     /** SUPERADMIN u OPERADOR — solo tiene sentido cuando esAdministrador es true. */
     var rol: String? = null
 
+    /** true cuando el usuario autenticado es DOCENTE (Fase 3). */
+    var esDocente: Boolean = false
+
+    /** Token JWT del docente — solo presente si esDocente = true. */
+    var docenteToken: String? = null
+
     /**
      * Semestre a simular (solo lo llenan los usuarios de prueba sem1..sem9,
      * ver AuthRepository). null = usar el historial académico real. No se
@@ -75,7 +85,9 @@ object UserSession {
         semestreSimulado: Int? = null,
         adminToken: String? = null,
         rol: String? = null,
-        alumnoToken: String? = null
+        alumnoToken: String? = null,
+        esDocente: Boolean = false,
+        docenteToken: String? = null
     ) {
         this.matricula = matricula
         this.correoOtp = correoOtp
@@ -85,6 +97,8 @@ object UserSession {
         this.adminToken = adminToken
         this.alumnoToken = alumnoToken
         this.rol = rol
+        this.esDocente = esDocente
+        this.docenteToken = docenteToken
         guardar()
     }
 
@@ -97,6 +111,8 @@ object UserSession {
         adminToken = null
         alumnoToken = null
         rol = null
+        esDocente = false
+        docenteToken = null
         prefs?.edit()?.clear()?.apply()
     }
 
@@ -109,6 +125,8 @@ object UserSession {
             if (adminToken == null) remove(CLAVE_ADMIN_TOKEN) else putString(CLAVE_ADMIN_TOKEN, adminToken)
             if (alumnoToken == null) remove(CLAVE_ALUMNO_TOKEN) else putString(CLAVE_ALUMNO_TOKEN, alumnoToken)
             if (rol == null) remove(CLAVE_ROL) else putString(CLAVE_ROL, rol)
+            putBoolean(CLAVE_ES_DOCENTE, esDocente)
+            if (docenteToken == null) remove(CLAVE_DOCENTE_TOKEN) else putString(CLAVE_DOCENTE_TOKEN, docenteToken)
         }?.apply()
     }
 
@@ -116,6 +134,7 @@ object UserSession {
         get() = when {
             nombreCompleto.isNotBlank() -> nombreCompleto.uppercase()
             esAdministrador -> "ADMINISTRADOR"
+            esDocente -> "DOCENTE"
             matricula.isNotBlank() -> "ALUMNO $matricula"
             else -> "ALUMNO TESCHI"
         }
