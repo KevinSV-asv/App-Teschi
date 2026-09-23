@@ -9,7 +9,7 @@
 
 | Término | Definición |
 |---|---|
-| **Matrícula** | Identificador único de un alumno dentro de la institución (ej. `2022452166`). Equivale a la clave primaria de negocio de `Alumnos`. |
+| **Matrícula** | Identificador único de un alumno dentro de la institución (ej. `2099000001`). Equivale a la clave primaria de negocio de `Alumnos`. |
 | **SIIA** | Sistema Institucional de Información Académica del TESCHI — portal ASP.NET donde vive oficialmente la información escolar. No expone API REST. |
 | **Retícula** | Documento oficial que define qué materias corresponden a cada semestre de una carrera, con sus créditos. Fuente de verdad para sembrar `PlanEstudioMaterias`. |
 | **Reinscripción** | Trámite semestral mediante el cual un alumno confirma su continuidad, elige grupo/turno (si es irregular) y sube su comprobante de pago. |

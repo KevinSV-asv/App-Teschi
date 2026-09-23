@@ -143,9 +143,10 @@ POST /api/reinscripcion/solicitud   { matricula, claveGrupo }
   (`database/sql/19_SolicitudesReinscripcion.sql`) con folio real y
   `Estatus = PENDIENTE` — la app ya no inventa un folio local.
 - **Se detectó y corrigió un hueco de datos**: `dbo.HistorialAcademico` no
-  tenía ninguna fila para el alumno real (2022452166) — su historial solo
-  vivía hardcodeado en el mock de Kotlin. Se migró a la base de datos real
-  con `database/sql/20_HistorialAcademicoRealKevin.sql` (transcrito literal
+  tenía ninguna fila para el alumno real que se usó para probarlo (matrícula
+  ficticia `2099000001` en esta documentación) — su historial solo vivía
+  hardcodeado en el mock de Kotlin. Se migró a la base de datos real
+  (script fuera de este repositorio; ver DEC-032) (transcrito literal
   del Kardex oficial, MERGE idempotente). Ese mismo endpoint real
   (`/api/mi-historial/{matricula}`) también conecta a Kardex/Tira/Calificaciones
   del lado del alumno desde DEC-023 — ya no queda ningún dato simulado ahí.

@@ -129,7 +129,7 @@ No todo alumno tiene contraseña local — la mayoría entra validando contra el
 `dbo.vw_HistorialAcademico` — une Alumno + Materia + Periodo + Grupo + Estatus en una sola consulta, ejemplo:
 
 ```sql
-SELECT * FROM dbo.vw_HistorialAcademico WHERE Matricula = '2022452166' ORDER BY Semestre;
+SELECT * FROM dbo.vw_HistorialAcademico WHERE Matricula = '2099000001' ORDER BY Semestre;
 ```
 
 ---

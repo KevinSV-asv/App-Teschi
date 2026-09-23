@@ -28,7 +28,7 @@ El usuario compartió captura del portal web institucional post-login. Elementos
 | Hero con foto del campus + título grande | `HeroBienvenida` — gradiente verde + card blanca informativa |
 | Cards horizontales con icono circular verde | Grid 2×2 con iconos en círculo verde claro |
 | FAB "Asistente disponible" | `ExtendedFloatingActionButton` verde (pendiente lógica) |
-| Pill usuario con nombre (ej. KEVIN ANTONIO) | `UserSession.nombreMostrar` desde matrícula autenticada |
+| Pill usuario con nombre (ej. ALUMNO DE PRUEBA) | `UserSession.nombreMostrar` desde matrícula autenticada |
 
 ---
 
