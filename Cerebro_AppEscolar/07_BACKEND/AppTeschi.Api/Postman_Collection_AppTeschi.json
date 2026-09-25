@@ -14,9 +14,198 @@
       "key": "api_key",
       "value": "{{api_key}}",
       "type": "string"
+    },
+    {
+      "key": "siia_usuario",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "siia_password",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "tipo",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "identificador",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ticket",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "codigo",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "alumno_token",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
+    {
+      "name": "SIIA - Login real",
+      "description": "Flujo Fase 2: valida contra el SIIA real, emite ticket, envia OTP y verifica. Corre las 3 en orden — cada una guarda automaticamente las variables que necesita la siguiente (ticket, identificador, tipo). Llena antes siia_usuario y siia_password en las variables de la coleccion, y codigo despues de revisar tu correo.",
+      "item": [
+        {
+          "name": "1. Login SIIA (POST /api/auth/siia)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "",
+                  "if (pm.response.code === 200 && data.ok && data.ticket) {",
+                  "    pm.collectionVariables.set(\"ticket\", data.ticket);",
+                  "    pm.collectionVariables.set(\"identificador\", data.identificador);",
+                  "    pm.collectionVariables.set(\"tipo\", data.tipo);",
+                  "    console.log(\"[SIIA] Ticket guardado. Correo enmascarado: \" + data.correoEnmascarado);",
+                  "} else if (data.cuentaPendiente) {",
+                  "    console.log(\"[SIIA] Cuenta pendiente de carrera para: \" + data.nombre);",
+                  "} else if (data.requiereCorreo) {",
+                  "    console.log(\"[SIIA] Falta correo registrado para: \" + data.identificador);",
+                  "} else {",
+                  "    console.log(\"[SIIA] Login fallo: \" + (data.error || pm.response.text()));",
+                  "}",
+                  "",
+                  "pm.test(\"Respuesta procesada\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 401, 403, 404, 429, 502]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{siia_usuario}}\",\n  \"password\": \"{{siia_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/siia",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "siia"
+              ]
+            }
+          }
+        },
+        {
+          "name": "2. Enviar codigo OTP (POST /api/otp/enviar)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "console.log(\"[OTP][ENVIAR] \" + JSON.stringify(data));",
+                  "",
+                  "pm.test(\"Se pidio el codigo (o el backend explico por que no)\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 400, 401, 404, 429]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo\": \"{{tipo}}\",\n  \"matricula\": \"{{identificador}}\",\n  \"correo\": \"\",\n  \"ticket\": \"{{ticket}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/otp/enviar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "otp",
+                "enviar"
+              ]
+            },
+            "description": "El campo \"correo\" se deja vacio a proposito: para un ALUMNO con correo ya guardado el backend lo ignora y usa el que tiene en la base (CorreoOtp / CorreoInstitucional)."
+          }
+        },
+        {
+          "name": "3. Verificar codigo OTP (POST /api/otp/verificar)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "console.log(\"[OTP][VERIFICAR] \" + JSON.stringify(data));",
+                  "",
+                  "if (data.ok && data.token) {",
+                  "    pm.collectionVariables.set(\"alumno_token\", data.token);",
+                  "    console.log(\"[OTP] Token de sesion guardado en {{alumno_token}}\");",
+                  "}",
+                  "",
+                  "pm.test(\"Se verifico (o el backend explico por que no)\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 400, 401, 404, 429]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo\": \"{{tipo}}\",\n  \"matricula\": \"{{identificador}}\",\n  \"codigo\": \"{{codigo}}\",\n  \"ticket\": \"{{ticket}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/otp/verificar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "otp",
+                "verificar"
+              ]
+            },
+            "description": "Llena la variable de coleccion \"codigo\" con el codigo de 6 digitos que llego al correo antes de correr esto."
+          }
+        }
+      ]
+    },
     {
       "name": "Health Check",
       "request": {
@@ -93,8 +282,14 @@
         "header": [],
         "url": {
           "raw": "{{base_url}}/api/catalogos/registro",
-          "host": ["{{base_url}}"],
-          "path": ["api", "catalogos", "registro"]
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "catalogos",
+            "registro"
+          ]
         }
       }
     },
@@ -103,7 +298,10 @@
       "request": {
         "method": "POST",
         "header": [
-          {"key": "Content-Type", "value": "application/json"}
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -111,8 +309,13 @@
         },
         "url": {
           "raw": "{{base_url}}/api/registro",
-          "host": ["{{base_url}}"],
-          "path": ["api", "registro"]
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "registro"
+          ]
         }
       }
     },
@@ -121,7 +324,10 @@
       "request": {
         "method": "POST",
         "header": [
-          {"key": "Content-Type", "value": "application/json"}
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -129,8 +335,14 @@
         },
         "url": {
           "raw": "{{base_url}}/api/auth/cuenta",
-          "host": ["{{base_url}}"],
-          "path": ["api", "auth", "cuenta"]
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "cuenta"
+          ]
         }
       }
     }

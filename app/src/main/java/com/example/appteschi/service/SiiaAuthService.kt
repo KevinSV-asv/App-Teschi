@@ -72,7 +72,8 @@ object SiiaAccountAuthService : SiiaAuthService {
                             TipoCuenta.DOCENTE else TipoCuenta.ALUMNO
                         return@withContext SiiaLoginResultado.RequiereCorreo(
                             tipo = tipo,
-                            identificador = json.optString("matricula")
+                            identificador = json.optString("identificador")
+                                .ifBlank { json.optString("matricula") }
                                 .ifBlank { json.optString("usuario") }
                         )
                     }
@@ -85,7 +86,8 @@ object SiiaAccountAuthService : SiiaAuthService {
                     val tipoStr = json.optString("tipo", "Alumno")
                     val tipo = if (tipoStr.equals("Docente", ignoreCase = true))
                         TipoCuenta.DOCENTE else TipoCuenta.ALUMNO
-                    val identificador = json.optString("matricula")
+                    val identificador = json.optString("identificador")
+                        .ifBlank { json.optString("matricula") }
                         .ifBlank { json.optString("usuario") }
 
                     SiiaLoginResultado.RequiereOtp(

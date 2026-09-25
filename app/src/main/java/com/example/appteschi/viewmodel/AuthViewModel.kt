@@ -181,7 +181,8 @@ class AuthViewModel(
         onEnviado: (correo: String) -> Unit
     ) {
         val correoLimpio = correoOtp.trim().lowercase()
-        if (correoLimpio.isBlank() || !correoLimpio.contains("@")) {
+        val esFlujoSiia = _uiState.value.correoSiiaEnmascarado.isNotBlank()
+        if (!esFlujoSiia && (correoLimpio.isBlank() || !correoLimpio.contains("@"))) {
             _uiState.update { it.copy(errorEnvio = "Ingresa un correo válido") }
             return
         }

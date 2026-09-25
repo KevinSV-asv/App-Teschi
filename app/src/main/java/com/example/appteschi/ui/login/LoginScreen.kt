@@ -475,9 +475,12 @@ private fun VerificacionSection(
         color = GreenPrimary,
         modifier = Modifier.padding(top = 4.dp)
     )
-    if (correoEnmascaradoSiia.isNotBlank()) {
+    // Flujo SIIA: el correo ya está en la BD — no se permite editar
+    val esFlujoSiia = correoEnmascaradoSiia.isNotBlank()
+
+    if (esFlujoSiia) {
         Text(
-            text = "Código al correo: $correoEnmascaradoSiia",
+            text = "Se enviará un código al correo: $correoEnmascaradoSiia",
             fontSize = 13.sp,
             color = TextMuted,
             modifier = Modifier.padding(top = 2.dp, bottom = 14.dp)
@@ -489,18 +492,17 @@ private fun VerificacionSection(
             color = TextMuted,
             modifier = Modifier.padding(top = 2.dp, bottom = 14.dp)
         )
+        LoginField(
+            label = "Correo electrónico",
+            value = correoOtp,
+            onValueChange = onCorreoChange,
+            placeholder = "tu@correo.com",
+            icon = Icons.Default.Email,
+            keyboardType = KeyboardType.Email
+        )
+        Spacer(modifier = Modifier.height(10.dp))
     }
 
-    LoginField(
-        label = "Correo electrónico",
-        value = correoOtp,
-        onValueChange = onCorreoChange,
-        placeholder = "tu@correo.com",
-        icon = Icons.Default.Email,
-        keyboardType = KeyboardType.Email
-    )
-
-    Spacer(modifier = Modifier.height(10.dp))
     OutlinedButton(
         onClick = onEnviarCodigo,
         enabled = !cargando,

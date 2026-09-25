@@ -3,6 +3,7 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const sql = require('mssql');
 const crypto = require('crypto');
+const https = require('https');
 const nodemailer = require('nodemailer');
 const { crearCorreoGraph, variablesGraphFaltantes } = require('./correo-graph');
 const jwt = require('jsonwebtoken');
@@ -178,7 +179,7 @@ function firmarTokenAlumno(alumno) {
   );
 }
 
-/** tipo: 'ALUMNO' | 'ADMINISTRADOR'; identificador: matrícula o usuario ya validados. */
+/** tipo: 'ALUMNO' | 'ADMINISTRADOR' | 'DOCENTE'; identificador: matrícula o usuario ya validados. */
 function firmarTicketLogin(tipo, identificador) {
   return jwt.sign({ tipo, id: String(identificador) }, process.env.JWT_SECRET,
     { expiresIn: TICKET_EXPIRA_EN, audience: AUD_TICKET });
@@ -187,7 +188,10 @@ function firmarTicketLogin(tipo, identificador) {
 function ticketLoginValido(ticket, tipo, identificador) {
   try {
     const p = jwt.verify(String(ticket || ''), process.env.JWT_SECRET, { audience: AUD_TICKET });
-    return p.tipo === tipo && String(p.id).toLowerCase() === String(identificador).trim().toLowerCase();
+    // ALUMNO, ADMINISTRADOR y DOCENTE son los tres tipos válidos
+    const tiposValidos = ['ALUMNO', 'ADMINISTRADOR', 'DOCENTE'];
+    return tiposValidos.includes(p.tipo) && p.tipo === tipo &&
+      String(p.id).toLowerCase() === String(identificador).trim().toLowerCase();
   } catch {
     return false;
   }
@@ -814,6 +818,196 @@ app.post('/api/auth/administrador', async (req, res) => {
   }
 });
 
+// ─── Autenticación SIIA real (Fase 2, ver DEC-031) ─────────────────────────
+// Valida usuario y contraseña directamente contra el SIIA de la escuela
+// (https://siia.teschi.edu.mx/Teschi/api/login.ashx) en vez de una copia
+// local de credenciales. Si el SIIA acepta al usuario, se sincroniza (o se
+// crea) su registro en dbo.Alumnos y se emite un ticket de 10 min para
+// completar el OTP de AppTESCHI.
+//
+// Respuestas posibles:
+//   ok:true + ticket + correoEnmascarado → alumno con correo registrado (flujo normal OTP)
+//   ok:true + cuentaPendiente:true       → alumno sin carrera mapeada aún (hay que
+//                                          asignarle IdCarrera manualmente en Admin)
+//   ok:true + requiereCorreo:true        → alumno sin correo OTP registrado
+//   ok:false                             → credenciales inválidas / error / tipo no soportado
+const SIIA_LOGIN_URL = process.env.SIIA_LOGIN_URL || 'https://siia.teschi.edu.mx/Teschi/api/login.ashx';
+
+// El SIIA no documenta los valores exactos de "tipo" — se normalizan por
+// coincidencia de texto y se deja el valor crudo si no se reconoce, para
+// poder ajustarlo con el log sin tener que adivinar de antemano.
+// El SIIA no documenta los valores de "tipo": en la práctica manda códigos
+// de una letra (confirmado con logs reales: "E" = alumno/escolar). "D" y "A"
+// son la suposición más común (docente / administrativo) mientras se
+// confirman con más logins; cualquier otro valor queda sin mapear y se
+// registra tal cual para poder añadirlo después.
+const TIPOS_SIIA_CONOCIDOS = {
+  E: 'ALUMNO',
+  D: 'DOCENTE',
+  A: 'ADMINISTRADOR'
+};
+
+function mapTipoSiia(tipoRaw) {
+  const t = String(tipoRaw || '').trim().toUpperCase();
+  if (!t) return 'DESCONOCIDO';
+  if (TIPOS_SIIA_CONOCIDOS[t]) return TIPOS_SIIA_CONOCIDOS[t];
+  if (t.includes('ALUM') || t.includes('ESTUD') || t.includes('ESCOLAR')) return 'ALUMNO';
+  if (t.includes('DOC') || t.includes('PROF') || t.includes('MAESTR')) return 'DOCENTE';
+  if (t.includes('ADMIN')) return 'ADMINISTRADOR';
+  return t;
+}
+
+function loginSiiaReal(usuario, password) {
+  return new Promise((resolve, reject) => {
+    let target;
+    try {
+      target = new URL(SIIA_LOGIN_URL);
+    } catch {
+      reject(new Error('SIIA_LOGIN_URL inválida'));
+      return;
+    }
+    const payload = Buffer.from(JSON.stringify({ usuario, password }), 'utf8');
+    const peticion = https.request({
+      hostname: target.hostname,
+      port: target.port || 443,
+      path: target.pathname + target.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': payload.length
+      },
+      timeout: 10000
+    }, (resp) => {
+      let raw = '';
+      resp.on('data', (chunk) => { raw += chunk; });
+      resp.on('end', () => {
+        let data = null;
+        try { data = raw ? JSON.parse(raw) : null; } catch { data = null; }
+        resolve({ statusCode: resp.statusCode, data });
+      });
+    });
+    peticion.on('timeout', () => peticion.destroy(new Error('Tiempo de espera agotado al contactar al SIIA')));
+    peticion.on('error', reject);
+    peticion.write(payload);
+    peticion.end();
+  });
+}
+
+app.post('/api/auth/siia', async (req, res) => {
+  try {
+    const usuario = String(req.body?.usuario || '').trim();
+    const password = String(req.body?.password || '');
+    if (!usuario || !password) {
+      return res.status(400).json({ ok: false, error: 'Usuario y contraseña del SIIA son obligatorios' });
+    }
+    if (excedeLimite(`${clientIp(req)}:auth-siia:${usuario}`, 8, 5 * 60 * 1000)) {
+      return res.status(429).json({ ok: false, error: 'Demasiados intentos. Espera unos minutos.' });
+    }
+
+    let siia;
+    try {
+      siia = await loginSiiaReal(usuario, password);
+    } catch (err) {
+      console.error('[AUTH-SIIA][RED]', err.message);
+      return res.status(502).json({ ok: false, error: 'No se pudo contactar al SIIA. Intenta más tarde.' });
+    }
+
+    const { statusCode, data } = siia;
+
+    if (statusCode === 401 || statusCode === 403) {
+      console.warn(`[AUTH-SIIA][RECHAZO] usuario=${usuario} status=${statusCode}`);
+      return res.status(401).json({ ok: false, error: data?.mensaje || 'Usuario o contraseña del SIIA incorrectos' });
+    }
+    if (statusCode === 429) {
+      console.warn(`[AUTH-SIIA][LIMITE-SIIA] usuario=${usuario}`);
+      return res.status(429).json({ ok: false, error: data?.mensaje || 'Demasiados intentos en el SIIA. Espera un momento.' });
+    }
+    if (statusCode !== 200 || !data?.ok) {
+      console.error(`[AUTH-SIIA][ERROR-SIIA] usuario=${usuario} status=${statusCode} body=${JSON.stringify(data)}`);
+      return res.status(502).json({ ok: false, error: data?.mensaje || 'El SIIA no respondió correctamente. Intenta más tarde.' });
+    }
+
+    const infoUsuario = data.usuario || {};
+    const matricula = String(infoUsuario.numUsuario || infoUsuario.usuario || usuario).trim();
+    const nombreCompleto = String(
+      infoUsuario.nombreCompleto ||
+      [infoUsuario.nombre, infoUsuario.paterno, infoUsuario.materno].filter(Boolean).join(' ')
+    ).trim();
+    const correoSiia = String(infoUsuario.correo || '').trim().toLowerCase();
+    const tipo = mapTipoSiia(infoUsuario.tipo);
+
+    console.log(`[AUTH-SIIA][SIIA-OK] usuario=${usuario} matricula=${matricula} tipoSiia="${infoUsuario.tipo}" tipoMapeado=${tipo}`);
+
+    if (tipo === 'DOCENTE') {
+      // Fase 3: los docentes no existen aún en AppTESCHI — el ticket DOCENTE
+      // llegará cuando se implemente la tabla Docentes.
+      return res.status(501).json({ ok: false, error: 'Soporte para docentes disponible próximamente (Fase 3)' });
+    }
+    if (tipo !== 'ALUMNO') {
+      console.warn(`[AUTH-SIIA][TIPO-NO-SOPORTADO] usuario=${usuario} tipoSiia="${infoUsuario.tipo}"`);
+      return res.status(403).json({ ok: false, error: 'Este tipo de cuenta del SIIA no está soportado todavía en la app.' });
+    }
+
+    const db = await getPool();
+
+    const alumnoResult = await db.request()
+      .input('Matricula', sql.NVarChar(20), matricula)
+      .query(`SELECT IdAlumno, Matricula, NombreCompleto, CorreoOtp, CorreoInstitucional, IdCarrera, UsuarioSiia
+              FROM dbo.Alumnos WHERE Matricula = @Matricula`);
+    const alumno = alumnoResult.recordset[0];
+
+    if (!alumno) {
+      // El SIIA validó al usuario, pero AppTESCHI no da de alta cuentas
+      // automáticamente: el alumno debe existir ya en dbo.Alumnos (import
+      // o registro manual). Así solo entra a la app quien la escuela ya
+      // tiene cargada, y nunca se crean cuentas con datos a medias.
+      console.warn(`[AUTH-SIIA][NO-REGISTRADO] usuario=${usuario} matricula=${matricula}`);
+      return res.status(404).json({
+        ok: false,
+        error: 'Tu matrícula todavía no está registrada en AppTESCHI. Contacta al administrador para que la den de alta.'
+      });
+    }
+
+    if (!alumno.UsuarioSiia) {
+      // Ya existía (por ejemplo, dado de alta a mano) pero nunca se había
+      // vinculado con su usuario del SIIA — se enlaza ahora que validó su
+      // contraseña real. Esto solo actualiza el enlace, no crea el alumno.
+      await db.request()
+        .input('IdAlumno', sql.Int, alumno.IdAlumno)
+        .input('UsuarioSiia', sql.NVarChar(50), usuario)
+        .query(`UPDATE dbo.Alumnos SET UsuarioSiia = @UsuarioSiia WHERE IdAlumno = @IdAlumno`);
+    }
+
+    if (!alumno.IdCarrera) {
+      console.log(`[AUTH-SIIA][PENDIENTE] usuario=${usuario} matricula=${matricula} sin carrera mapeada`);
+      return res.json({ ok: true, cuentaPendiente: true, nombre: alumno.NombreCompleto || nombreCompleto });
+    }
+
+    const correoOtp = String(alumno.CorreoOtp || alumno.CorreoInstitucional || correoSiia || '').trim();
+    if (!correoOtp) {
+      console.log(`[AUTH-SIIA][SIN-CORREO] usuario=${usuario} matricula=${matricula}`);
+      return res.json({ ok: true, requiereCorreo: true, tipo: 'ALUMNO', identificador: alumno.Matricula });
+    }
+
+    // Flujo normal — emitir ticket para OTP
+    const ticket = firmarTicketLogin('ALUMNO', alumno.Matricula);
+    const correoEnmascarado = enmascararCorreo(correoOtp);
+    console.log(`[AUTH-SIIA][OK] usuario=${usuario} matricula=${alumno.Matricula}`);
+    res.json({
+      ok: true,
+      tipo: 'ALUMNO',
+      identificador: alumno.Matricula,
+      nombre: alumno.NombreCompleto || nombreCompleto,
+      ticket,
+      correoEnmascarado,
+      cambioPw: !!infoUsuario.cambioPw
+    });
+  } catch (err) {
+    console.error('[AUTH-SIIA][ERROR]', err.message);
+    res.status(500).json({ ok: false, error: 'No se pudo validar con el SIIA' });
+  }
+});
+
 // ─── OTP — generación y verificación 100% en el servidor (ver DEC-019) ──────
 // tipo: "ALUMNO" (default) o "ADMINISTRADOR". El código nunca vive en el
 // cliente — la app solo sabe si el backend dice que es correcto o no.
@@ -821,13 +1015,18 @@ app.post('/api/otp/enviar', async (req, res) => {
   try {
     const tipo = String(req.body?.tipo || 'ALUMNO').toUpperCase();
     const identificador = String(req.body?.matricula || req.body?.usuario || '').trim();
-    const correo = String(req.body?.correo || '').trim().toLowerCase();
-    if (!identificador || !correo || !correo.includes('@')) {
-      return res.status(400).json({ ok: false, error: 'Matrícula/usuario y correo son obligatorios' });
+    // El correo que manda el cliente es solo un candidato: para un ALUMNO
+    // con correo ya guardado (caso SIIA, donde la app ni siquiera lo conoce
+    // — solo ve la versión enmascarada) se ignora y se usa el de la base,
+    // igual que en recuperar contraseña. Solo se exige el del cliente
+    // cuando no hay ninguno guardado (alta nueva vía Cuenta AppTESCHI).
+    const correoCliente = String(req.body?.correo || '').trim().toLowerCase();
+    if (!identificador) {
+      return res.status(400).json({ ok: false, error: 'Matrícula/usuario es obligatorio' });
     }
     // Sin el ticket que emite /api/auth/* al validar la contraseña, cualquiera
     // podría pedir el código a un correo propio para la cuenta de otro.
-    if (!ticketLoginValido(req.body?.ticket, tipo === 'ADMINISTRADOR' ? 'ADMINISTRADOR' : 'ALUMNO', identificador)) {
+    if (!ticketLoginValido(req.body?.ticket, tipo, identificador)) {
       console.warn(`[OTP][SIN-TICKET] envio tipo=${tipo} id=${identificador.slice(0, 20)}`);
       return res.status(401).json({ ok: false, error: 'Tu inicio de sesión expiró. Vuelve a ingresar tu usuario y contraseña.' });
     }
@@ -838,16 +1037,27 @@ app.post('/api/otp/enviar', async (req, res) => {
     const db = await getPool();
     let idAlumno = null;
     let idAdministrador = null;
+    let correoGuardado = '';
     if (tipo === 'ADMINISTRADOR') {
       const r = await db.request().input('Usuario', sql.NVarChar(50), identificador)
         .query(`SELECT IdAdministrador FROM dbo.Administradores WHERE Usuario = @Usuario AND Activo = 1`);
       if (!r.recordset[0]) return res.status(404).json({ ok: false, error: 'Administrador no encontrado' });
       idAdministrador = r.recordset[0].IdAdministrador;
+    } else if (tipo === 'DOCENTE') {
+      // Fase 3: los docentes no existen aún — el ticket DOCENTE llegará cuando
+      // se implemente la tabla Docentes. Por ahora rechazamos con mensaje claro.
+      return res.status(501).json({ ok: false, error: 'Soporte para docentes disponible próximamente (Fase 3)' });
     } else {
       const r = await db.request().input('Matricula', sql.NVarChar(20), identificador)
-        .query(`SELECT IdAlumno FROM dbo.Alumnos WHERE Matricula = @Matricula`);
+        .query(`SELECT IdAlumno, CorreoOtp, CorreoInstitucional FROM dbo.Alumnos WHERE Matricula = @Matricula`);
       if (!r.recordset[0]) return res.status(404).json({ ok: false, error: 'Alumno no encontrado' });
       idAlumno = r.recordset[0].IdAlumno;
+      correoGuardado = String(r.recordset[0].CorreoOtp || r.recordset[0].CorreoInstitucional || '').trim().toLowerCase();
+    }
+
+    const correo = correoGuardado || correoCliente;
+    if (!correo || !correo.includes('@')) {
+      return res.status(400).json({ ok: false, error: 'No hay un correo registrado para esta cuenta. Especifica uno válido.' });
     }
 
     const codigo = String(crypto.randomInt(100000, 1000000));
@@ -880,7 +1090,7 @@ app.post('/api/otp/verificar', async (req, res) => {
     if (!identificador || !/^\d{6}$/.test(codigo)) {
       return res.status(400).json({ ok: false, error: 'Código inválido' });
     }
-    if (!ticketLoginValido(req.body?.ticket, tipo === 'ADMINISTRADOR' ? 'ADMINISTRADOR' : 'ALUMNO', identificador)) {
+    if (!ticketLoginValido(req.body?.ticket, tipo, identificador)) {
       console.warn(`[OTP][SIN-TICKET] verificacion tipo=${tipo} id=${identificador.slice(0, 20)}`);
       return res.status(401).json({ ok: false, error: 'Tu inicio de sesión expiró. Vuelve a ingresar tu usuario y contraseña.' });
     }
@@ -889,6 +1099,9 @@ app.post('/api/otp/verificar', async (req, res) => {
     }
 
     const db = await getPool();
+    if (tipo === 'DOCENTE') {
+      return res.status(501).json({ ok: false, error: 'Soporte para docentes disponible próximamente (Fase 3)' });
+    }
     const columna = tipo === 'ADMINISTRADOR' ? 'IdAdministrador' : 'IdAlumno';
     const idLookup = tipo === 'ADMINISTRADOR'
       ? await db.request().input('U', sql.NVarChar(50), identificador)
