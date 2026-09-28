@@ -936,7 +936,7 @@ app.post('/api/auth/siia', async (req, res) => {
     const correoSiia = String(infoUsuario.correo || '').trim().toLowerCase();
     const tipo = mapTipoSiia(infoUsuario.tipo);
 
-    console.log(`[AUTH-SIIA][SIIA-OK] usuario=${usuario} matricula=${matricula} tipoSiia="${infoUsuario.tipo}" tipoMapeado=${tipo}`);
+    console.log(`[AUTH-SIIA][SIIA-OK] usuario=${usuario} matricula=${matricula} tipoSiia="${infoUsuario.tipo}" tipoMapeado=${tipo} idCarreraSiia=${infoUsuario.idCarrera} carreraSiia="${infoUsuario.carrera}"`);
 
     if (tipo === 'DOCENTE') {
       // Fase 3: los docentes no existen aún en AppTESCHI — el ticket DOCENTE
@@ -978,8 +978,34 @@ app.post('/api/auth/siia', async (req, res) => {
         .query(`UPDATE dbo.Alumnos SET UsuarioSiia = @UsuarioSiia WHERE IdAlumno = @IdAlumno`);
     }
 
-    if (!alumno.IdCarrera) {
-      console.log(`[AUTH-SIIA][PENDIENTE] usuario=${usuario} matricula=${matricula} sin carrera mapeada`);
+    let idCarreraAlumno = alumno.IdCarrera;
+
+    if (!idCarreraAlumno && infoUsuario.idCarrera) {
+      // El SIIA sí trae la carrera del alumno — si ya está mapeada en
+      // CatalogoCarreras.IdCarreraSiia (ver migración 24), se enlaza sola
+      // en vez de dejarlo en "cuenta pendiente" para siempre.
+      const carreraMapeada = await db.request()
+        .input('IdCarreraSiia', sql.Int, infoUsuario.idCarrera)
+        .query(`SELECT IdCarrera, Clave FROM dbo.CatalogoCarreras WHERE IdCarreraSiia = @IdCarreraSiia`);
+      const carrera = carreraMapeada.recordset[0];
+      if (carrera) {
+        await db.request()
+          .input('IdAlumno', sql.Int, alumno.IdAlumno)
+          .input('IdCarrera', sql.Int, carrera.IdCarrera)
+          .query(`UPDATE dbo.Alumnos SET IdCarrera = @IdCarrera WHERE IdAlumno = @IdAlumno`);
+        idCarreraAlumno = carrera.IdCarrera;
+        console.log(`[AUTH-SIIA][CARRERA-ENLAZADA] usuario=${usuario} matricula=${matricula} idCarreraSiia=${infoUsuario.idCarrera} -> ${carrera.Clave}`);
+      }
+    }
+
+    if (!idCarreraAlumno) {
+      // Se deja registrado el idCarrera/nombre que trae el SIIA para que
+      // sea trivial completar el mapeo (ver 24_MapeoCarrerasSiia.sql) sin
+      // tener que pedirle a este alumno que vuelva a intentar.
+      console.log(
+        `[AUTH-SIIA][PENDIENTE] usuario=${usuario} matricula=${matricula} sin carrera mapeada ` +
+        `idCarreraSiia=${infoUsuario.idCarrera} carreraSiia="${infoUsuario.carrera}" tipoCarreraSiia="${infoUsuario.tipoCarrera}"`
+      );
       return res.json({ ok: true, cuentaPendiente: true, nombre: alumno.NombreCompleto || nombreCompleto });
     }
 

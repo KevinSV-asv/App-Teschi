@@ -49,6 +49,31 @@
       "key": "alumno_token",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "siia_base_url",
+      "value": "https://siia.teschi.edu.mx/Teschi/api",
+      "type": "string"
+    },
+    {
+      "key": "siia_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "siia_grupo",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "siia_idMateria",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "siia_periodo",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -202,6 +227,231 @@
               ]
             },
             "description": "Llena la variable de coleccion \"codigo\" con el codigo de 6 digitos que llego al correo antes de correr esto."
+          }
+        }
+      ]
+    },
+    {
+      "name": "SIIA - API real (directa)",
+      "description": "Llama DIRECTO a la API del SIIA (https://siia.teschi.edu.mx/Teschi/api), sin pasar por el backend de AppTESCHI. Util para ver exactamente que trae el login (tipo, idCarrera, correo) y probar asistencia. El login de aqui guarda el token en siia_token para las demas requests.",
+      "item": [
+        {
+          "name": "1. Login (SIIA real)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "console.log(\"[SIIA-REAL][LOGIN] \" + JSON.stringify(data));",
+                  "",
+                  "if (pm.response.code === 200 && data.ok && data.token) {",
+                  "    pm.collectionVariables.set(\"siia_token\", data.token);",
+                  "    const u = data.usuario || {};",
+                  "    console.log(\"[SIIA-REAL] tipo=\" + u.tipo + \" idCarrera=\" + u.idCarrera + \" carrera=\\\"\" + u.carrera + \"\\\" tipoCarrera=\\\"\" + u.tipoCarrera + \"\\\" area=\\\"\" + u.area + \"\\\" numUsuario=\" + u.numUsuario);",
+                  "} else {",
+                  "    console.log(\"[SIIA-REAL] Login fallo: \" + (data.mensaje || pm.response.text()));",
+                  "}",
+                  "",
+                  "pm.test(\"El SIIA respondio\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 400, 401, 403, 422, 429]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{siia_usuario}}\",\n  \"password\": \"{{siia_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{siia_base_url}}/login.ashx",
+              "host": [
+                "{{siia_base_url}}"
+              ],
+              "path": [
+                "login.ashx"
+              ]
+            },
+            "description": "Valida el usuario del SIIA y devuelve un token (480 min) + los datos reales del usuario (tipo, idCarrera, correo, etc). Maximo 5 intentos por usuario+IP cada 60s."
+          }
+        },
+        {
+          "name": "2. Listar grupos del docente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "console.log(\"[SIIA-REAL][GRUPOS] \" + JSON.stringify(data));",
+                  "",
+                  "pm.test(\"Respondio\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 401, 403]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{siia_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{siia_base_url}}/asistencia/grupos.ashx?periodo={{siia_periodo}}",
+              "host": [
+                "{{siia_base_url}}"
+              ],
+              "path": [
+                "asistencia",
+                "grupos.ashx"
+              ],
+              "query": [
+                {
+                  "key": "periodo",
+                  "value": "{{siia_periodo}}",
+                  "description": "Opcional. Si se omite, usa el periodo actual."
+                }
+              ]
+            },
+            "description": "Solo para cuentas tipo docente. Requiere el token de la request 1."
+          }
+        },
+        {
+          "name": "3. Listar alumnos y asistencia de un grupo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "console.log(\"[SIIA-REAL][ALUMNOS] \" + JSON.stringify(data));",
+                  "",
+                  "pm.test(\"Respondio\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 400, 401, 403]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{siia_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{siia_base_url}}/asistencia/alumnos.ashx?grupo={{siia_grupo}}&idMateria={{siia_idMateria}}&periodo={{siia_periodo}}",
+              "host": [
+                "{{siia_base_url}}"
+              ],
+              "path": [
+                "asistencia",
+                "alumnos.ashx"
+              ],
+              "query": [
+                {
+                  "key": "grupo",
+                  "value": "{{siia_grupo}}",
+                  "description": "Requerido, ej. 1ISC11"
+                },
+                {
+                  "key": "idMateria",
+                  "value": "{{siia_idMateria}}",
+                  "description": "Requerido"
+                },
+                {
+                  "key": "periodo",
+                  "value": "{{siia_periodo}}",
+                  "description": "Opcional"
+                },
+                {
+                  "key": "fecha",
+                  "value": "",
+                  "description": "Opcional, formato dd/MM/yyyy",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "4. Guardar o retirar asistencia",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "console.log(\"[SIIA-REAL][GUARDAR] \" + JSON.stringify(data));",
+                  "",
+                  "pm.test(\"Respondio\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 400, 401, 403]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{siia_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"periodo\": \"{{siia_periodo}}\",\n  \"grupo\": \"{{siia_grupo}}\",\n  \"idMateria\": {{siia_idMateria}},\n  \"matricula\": \"\",\n  \"fecha\": \"\",\n  \"asistencia\": true\n}"
+            },
+            "url": {
+              "raw": "{{siia_base_url}}/asistencia/guardar.ashx",
+              "host": [
+                "{{siia_base_url}}"
+              ],
+              "path": [
+                "asistencia",
+                "guardar.ashx"
+              ]
+            }
           }
         }
       ]
