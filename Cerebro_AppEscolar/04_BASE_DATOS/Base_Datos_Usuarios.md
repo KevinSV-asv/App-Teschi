@@ -1,8 +1,10 @@
 # Base de Datos — AppTESCHI (esquema V2, normalizado)
 
-- **Motor:** SQL Server Express
+> ⛔ **Histórico (12/10/2026, DEC-043):** la app ya no usa `AppTeschiDB`; habla directo con la API del SIIA. Se conserva en el repositorio solo como referencia.
+
+- **Motor:** SQL Server 2022 Express (servidor Ubuntu, en Docker) · actualizado 27/09/2026
 - **Base de datos:** `AppTeschiDB`
-- **Relacionado con:** [[MAPA_PROYECTO]], [[2FA_Login]], [[DECISIONES_TECNICAS]] (DEC-014)
+- **Relacionado con:** [[MAPA_PROYECTO]], [[2FA_Login]], [[API_SIIA_Oficial]], [[DECISIONES_TECNICAS]] (DEC-014, DEC-036, DEC-037)
 - **Backend que la consume:** `07_BACKEND/AppTeschi.Api/server.js`
 
 ---
@@ -74,7 +76,7 @@ erDiagram
 ### Identidad
 
 #### `Alumnos` — reemplaza a `Usuarios` + `CuentasRegistro`
-Un único registro por persona, sin importar si llegó por registro local, por sincronización del SIIA, o por ambos caminos.
+Un único registro por persona. Lo crea el administrador (o el propio alumno con `/api/registro`); **el login por el SIIA nunca crea uno** (DEC-036), solo se vincula a uno existente.
 
 | Columna | Tipo | Notas |
 |---|---|---|
@@ -85,6 +87,10 @@ Un único registro por persona, sin importar si llegó por registro local, por s
 | `IdSistema`, `IdCarrera` | INT | FK a los catálogos |
 | `Equivalencias`, `Activo` | BIT | |
 | `IntentosFallidosOtp`, `BloqueadoHasta` | | Antifuerza bruta del OTP |
+| `Semestre` | INT NULL (1-12) | Lo asigna el administrador (`16_AgregarSemestreAlumnos.sql`) |
+| `CorreoOtp` | NVARCHAR(255) NULL | Correo al que llegan los códigos (login y recuperación) |
+| `UsuarioSiia` | NVARCHAR(50) NULL | Usuario del SIIA; se llena en su primer login por el SIIA. Índice único parcial `UX_Alumnos_UsuarioSiia` (`24_VinculoSiia.sql`) |
+| `OrigenCuenta` | NVARCHAR(10) | `PROPIA` / `SIIA` — sin uso desde DEC-036 (todas quedan `PROPIA`) |
 
 > **¿Por qué `NombreCompleto` es un solo campo y no `Nombres`/`ApellidoPaterno`/`ApellidoMaterno`?**
 > El SIIA y el resto de la app (`UserSession.nombreCompleto` en Kotlin) siempre manejan el nombre como una sola cadena. Solo el formulario de registro local pedía los 3 campos por separado, y el propio backend los volvía a concatenar en cada consulta (`server.js` v1: `` `${Nombres} ${ApellidoPaterno} ${ApellidoMaterno}` ``). Separar un dato que el resto del sistema jamás vuelve a separar es complejidad sin beneficio — se concatena una sola vez, al registrar.
@@ -99,7 +105,7 @@ No todo alumno tiene contraseña local — la mayoría entra validando contra el
 | Tabla | Para qué sirve |
 |---|---|
 | `CatalogoSistemas` | Escolarizado / Abierto / Dual |
-| `CatalogoCarreras` | Las 9 carreras del TESCHI (con `IdSistema`) |
+| `CatalogoCarreras` | Las 9 carreras del TESCHI (con `IdSistema`). `IdCarreraSiia` = el `idCarrera` que manda el SIIA (solo ISC = 4 por ahora, DEC-037) |
 | `CatalogoPeriodos` | `Anio` + `Numero` (1 o 2) → `Etiqueta` calculada ("2026-2") — una sola fuente para cualquier periodo, en vez de texto libre repetido |
 | `CatalogoEstatusMateria` | `AP` / `PC` / `NA` — mismos códigos del Kardex oficial |
 | `CatalogoTurnos` | Matutino / Vespertino |
@@ -122,7 +128,7 @@ No todo alumno tiene contraseña local — la mayoría entra validando contra el
 
 `HistorialAcademico.TipoRegistro` (`EVALUACION` / `REPETICION` / `ESPECIAL`) es la versión **normalizada** de los 3 grupos de columnas "Calificación + Periodo" que repite el PDF oficial del Kardex: en vez de 6 columnas casi siempre vacías, cada intento de una materia es una fila.
 
-> **Actualizado en DEC-017:** `HistorialAcademico` ya se lee/escribe en producción, pero solo desde el lado del **administrador** (`GET`/`PUT /api/calificaciones/...`, pantalla `AdminCalificacionesScreen`) — captura/edita la calificación de cualquier alumno. El módulo "Calificaciones" del **alumno** (`CalificacionesViewModel.kt`) sigue siendo un *mock* local en Kotlin, independiente de esta tabla; falta conectarlo para que un alumno vea sus propias calificaciones reales. `PlanEstudioMaterias`/`Grupos` siguen sin endpoints de escritura (se siembran manualmente vía los scripts SQL).
+> **Estado actual (DEC-017, DEC-023):** `HistorialAcademico` se lee y escribe en producción desde los dos lados: el administrador captura calificaciones (`/api/calificaciones`) y el alumno ve las suyas en Kardex, Tira de Materias y Calificaciones (`/api/mi-historial`). `PlanEstudioMaterias`/`Grupos` siguen sin endpoints de escritura (se siembran con los scripts SQL).
 
 ### Vista de conveniencia
 
@@ -148,33 +154,41 @@ Los nombres de `CatalogoCarreras` estaban guardados con los acentos corruptos en
 
 ## Ubicación de los scripts
 
+Todos en `04_BASE_DATOS/sql/` de esta bóveda (única copia; la carpeta `database/sql/` del repo se retiró el 27/09/2026 por duplicada). Idempotentes: se pueden volver a correr.
+
 | Archivo | Descripción |
 |---|---|
-| `AppTeschi/database/sql/01_CrearBaseDatos.sql` | Esquema V1 original (histórico) |
-| `AppTeschi/database/sql/03_MigracionV2_Normalizacion.sql` | **Migración V1 → V2** — crea `Alumnos`, migra datos, crea el dominio académico |
-| `AppTeschi/database/sql/02_ProcedimientosUsuarios.sql` | SPs actualizados al esquema V2 (`sp_UpsertAlumno`, `sp_RegistrarOtp`, `sp_VerificarOtp`, `sp_IniciarSesion`) — ninguno lo usa el backend hoy, son opcionales |
-| `AppTeschi/database/sql/04_SeedMateriasAnimacion.sql` | Plan de estudios real de Ingeniería en Animación Digital y Efectos Visuales (48 materias, 235 créditos) |
-| `AppTeschi/database/sql/05_SeedGruposAnimacion.sql` | 21 grupos reales de Animación (fuente: "Horarios Animacion.pdf" 2026-2) — clave real del SIIA para esta carrera es **`ADYEV`**, no `ANIMACION` |
-| `AppTeschi/database/sql/06_SeedGruposIndustrial.sql` | 16 grupos reales de Ingeniería Industrial (fuente: "Horarios_Industrial.pdf" 2026-2) — clave real del SIIA es **`II`**; único caso con grupos de 9° semestre (`9II21`, `9II22`), a diferencia de ISC/Animación |
-| `AppTeschi/database/sql/07_SeedMateriasIndustrial.sql` | Plan de estudios de Ingeniería Industrial — **parcial** (47 de 53 materias, 212 créditos), fuente: mapa curricular oficial TecNM IIND-2010-227. Faltan 6 materias de 8°/9° semestre cuyo crédito no se pudo leer con confianza en la imagen (ver detalle abajo) |
-| `AppTeschi/database/sql/08_SeedMateriasMecatronica.sql` | Plan de estudios completo de Ingeniería Mecatrónica (52 materias, 260 créditos — suma exacta contra el total institucional oficial) |
-| `AppTeschi/database/sql/09_SeedGruposMecatronica.sql` | 14 grupos reales de Mecatrónica (fuente: "Horario Mecatronica grupos 26-2.pdf" 2026-2) — clave real del SIIA es **`IM`**; también tiene grupo de 9° semestre (`9IM21`) |
-| `AppTeschi/database/sql/10_SeedMateriasQuimica.sql` | Plan de estudios completo de Ingeniería Química (52 materias, 260 créditos — cada valor viene de la tabla oficial "CLAVE/ASIGNATURA/HORAS" impresa en cada horario de grupo, no de la retícula; suma exacta contra el total institucional) |
-| `AppTeschi/database/sql/11_SeedGruposQuimica.sql` | 13 grupos reales de Química (fuente: "Horarios Quimica.pdf" 2026-2, PDF escaneado) — clave real del SIIA es **`IQ`** |
-| `AppTeschi/database/sql/12_SeedMateriasAdministracion.sql` | Plan de estudios completo de Licenciatura en Administración (54 materias, 260 créditos — cada semestre coincide exactamente con el total de créditos por columna de la retícula oficial LADM-2010-234) |
-| `AppTeschi/database/sql/13_SeedGruposAdministracion.sql` | 26 grupos reales de Administración (fuente: "HORARIOS Administracion 2026-2.pdf") — clave real del SIIA es **`LA`**; la carrera con más grupos de 9° semestre encontrada (`9LA21`, `9LA22`, `9LA23`) |
-| `AppTeschi/database/sql/14_SeedMateriasGastronomia.sql` | Plan de estudios completo de Licenciatura en Gastronomía (53 materias, 260 créditos) — se agregó "Servicio Social" (10 créditos) que no venía en la lista del alumno pero sí en la retícula oficial, para llegar al total institucional correcto |
-| `AppTeschi/database/sql/15_SeedGruposGastronomia.sql` | 28 grupos reales de Gastronomía (fuente: "HORARIOS DE GRUPOS GASTRONOMIA 2026-2.pdf") — clave real del SIIA es **`LG`**; la carrera con más grupos totales encontrada hasta ahora |
-| `AppTeschi/database/sql/16_AgregarSemestreAlumnos.sql` | Agrega `Alumnos.Semestre` (nullable, 1-12) — lo asigna el administrador; junto con `IdCarrera` permite calcular la carga académica esperada de un alumno (ver DEC-016) |
-| `AppTeschi/database/sql/17_TablaAdministradores.sql` | `Administradores` + `AdministradorCredenciales` — cuentas reales de administrador, separadas de `Alumnos` (ver DEC-019) |
-| `AppTeschi/database/sql/18_OtpHistorialParaAdministradores.sql` | `OtpHistorial.IdAlumno` pasa a nullable, se agrega `IdAdministrador` nullable + `CHECK` "exactamente uno de los dos", y `Intentos TINYINT` (ver DEC-019) |
-| `04_BASE_DATOS/sql/` (bóveda) | Copia de respaldo de los mismos 18 scripts |
+| `01_CrearBaseDatos.sql` | Esquema V1 original (histórico) |
+| `02_ProcedimientosUsuarios.sql` | SPs al esquema V2 (`sp_UpsertAlumno`, `sp_RegistrarOtp`, `sp_VerificarOtp`, `sp_IniciarSesion`) — el backend no los usa |
+| `03_MigracionV2_Normalizacion.sql` | **Migración V1 → V2** — crea `Alumnos`, migra datos, crea el dominio académico |
+| `04_SeedMateriasAnimacion.sql` | Plan de estudios de Animación Digital y Efectos Visuales (48 materias, 235 créditos) |
+| `05_SeedGruposAnimacion.sql` | 21 grupos reales de Animación (clave real del SIIA: **`ADYEV`**) |
+| `06_SeedGruposIndustrial.sql` | 16 grupos reales de Ingeniería Industrial (clave **`II`**; con 9° semestre) |
+| `07_SeedMateriasIndustrial.sql` | Plan de Ingeniería Industrial — **parcial** (47 de 53 materias, ver abajo) |
+| `08_SeedMateriasMecatronica.sql` · `09_SeedGruposMecatronica.sql` | Mecatrónica: 52 materias (260 cr) y 14 grupos (clave **`IM`**) |
+| `10_SeedMateriasQuimica.sql` · `11_SeedGruposQuimica.sql` | Química: 52 materias (260 cr) y 13 grupos (clave **`IQ`**) |
+| `12_SeedMateriasAdministracion.sql` · `13_SeedGruposAdministracion.sql` | Administración: 54 materias (260 cr) y 26 grupos (clave **`LA`**) |
+| `14_SeedMateriasGastronomia.sql` · `15_SeedGruposGastronomia.sql` | Gastronomía: 53 materias (260 cr) y 28 grupos (clave **`LG`**) |
+| `16_AgregarSemestreAlumnos.sql` | `Alumnos.Semestre` (DEC-016) |
+| `17_TablaAdministradores.sql` | `Administradores` + `AdministradorCredenciales` (DEC-019) |
+| `18_OtpHistorialParaAdministradores.sql` | `OtpHistorial.IdAdministrador` + `CHECK` "exactamente uno" (DEC-019) |
+| `19_SolicitudesReinscripcion.sql` | Solicitudes de reinscripción (DEC-024) |
+| `20_…` | Historial real de una persona: **fuera del repositorio** (`privado_no_subir_a_git/`, DEC-032) |
+| `21_CorregirNombresPruebaCorruptos.sql` | Corrige 5 nombres con acentos rotos (BUG-014) |
+| `22_ObservacionesReglamento.sql` | Observaciones de reglamento que bloquean la reinscripción (DEC-024) |
+| `23_Horarios.sql` | Tabla `Horarios` (DEC-029) |
+| `24_VinculoSiia.sql` | `Alumnos.UsuarioSiia`, `Alumnos.OrigenCuenta`, `CatalogoCarreras.IdCarreraSiia` (DEC-035) — aplicado 23/09/2026 |
+| `25_MapeoCarrerasSiia.sql` | Equivalencias de carrera SIIA → local (DEC-037) — ISC aplicado 27/09/2026 |
+| `pendientes/Docentes.sql` | Tabla `Docentes` — Fase 3, **no aplicado** |
+| `pendientes/AdministradoresSiia.sql` | `Administradores.UsuarioSiia` — Fase 5, **no aplicado** |
 
 ### Orden de ejecución en una base nueva
 
 ```
-01 → 03 → 02 → 04 → 05 → 06 → 07 → 08 → 09 → 10 → 11 → 12 → 13 → 14 → 15 → 16 → 17 → 18
+01 → 03 → 02 → 04 → 05 → … → 19 → (20 privado) → 21 → 22 → 23 → 24 → 25
 ```
+
+> En el servidor: `sqlcmd … -C -f 65001` y `SET QUOTED_IDENTIFIER ON` (ver [[04_Manual_Mantenimiento]] §7).
 
 ### Pendiente: 6 materias de Ingeniería Industrial sin créditos confirmados
 
@@ -197,12 +211,12 @@ Cuando se confirmen sus créditos, agregarlas con un `INSERT` adicional a `PlanE
 
 | Parámetro | Valor |
 |---|---|
-| **Servidor** | `VICTUS` (SQL Server local) |
-| **Base de datos** | `AppTeschiDB` ✅ Migrada a V2 el 08/09/2026 |
-| **Alumnos migrados** | 15 (9 de `Usuarios` + 7 de `CuentasRegistro`, 1 matrícula duplicada entre ambas se fusionó en un solo registro) |
-| **Con contraseña local** | 7 |
-| **Materias sembradas** | 53 ISC + 48 Animación + 47/53 Industrial (parcial) + 52 Mecatrónica + 52 Química + 54 Administración + 53 Gastronomía — todas a 260 créditos salvo Animación (235cr) e Industrial (212cr, parcial) |
-| **Grupos sembrados** | 20 ISC + 21 Animación + 16 Industrial + 14 Mecatrónica + 13 Química + 26 Administración + 28 Gastronomía (todos reales, ciclo 2026-2) |
+| **Servidor** | Ubuntu (casa), contenedor Docker `appteschi-sql`, SQL Server 2022 Express, solo `127.0.0.1:1433` (DEC-031) |
+| **Base de datos** | `AppTeschiDB`, restaurada desde la laptop el 19/09/2026; migraciones 24 y 25 aplicadas después |
+| **Login de la API** | `appteschi_api` (`db_owner` solo en `AppTeschiDB`) |
+| **Respaldo** | Diario 03:15, 14 días, en el mismo servidor |
+| **Carreras** | 9 en el catálogo; plan de estudios y grupos reales de 7 (ISC, Animación, Industrial parcial, Mecatrónica, Química, Administración, Gastronomía) |
+| **Laptop** | Base de desarrollo propia (`VICTUS`), **no sincronizada** con la del servidor |
 
 ---
 
@@ -216,12 +230,13 @@ Endpoints de `server.js` actualizados al esquema V2 (mismo contrato JSON hacia l
 
 | Endpoint | Qué hace ahora |
 |---|---|
-| `POST /api/registro` | Si la matrícula ya existe como perfil sincronizado del SIIA (sin contraseña), completa ese mismo registro en vez de crear uno nuevo — antes creaba una fila separada e inconsistente |
+| `POST /api/registro` | Si la matrícula ya existe como perfil creado por el administrador (sin contraseña), completa ese mismo registro en vez de crear uno nuevo. ⚠️ Riesgo abierto de DEC-030 antes de abrir a internet |
 | `POST /api/auth/cuenta` | Valida contra `Alumnos` + `AlumnoCredenciales` (alumnos únicamente) |
+| `POST /api/auth/siia` | (DEC-035/036/037/040) — valida con la API oficial del SIIA; si el alumno existe guarda `UsuarioSiia` y enlaza la carrera por `IdCarreraSiia`; si no existe, entra sin registro (`sinRegistro`, nada se escribe en la base); responde ticket + `correoEnmascarado` (vacío si no hay correo, BUG-022) o `cuentaPendiente` |
 | `POST /api/auth/administrador` | **Nuevo** (DEC-019) — valida contra `Administradores` + `AdministradorCredenciales`, devuelve `rol` |
 | `POST /api/otp/enviar`, `POST /api/otp/verificar` | (DEC-019) — generan/verifican el código en `OtpHistorial`; `tipo: "ALUMNO"\|"ADMINISTRADOR"` decide contra cuál tabla resuelve el identificador. Al verificar un administrador, emite el JWT de sesión (DEC-020) |
 | `GET/POST/PUT /api/administradores[/:usuario]` | **Nuevos** (DEC-020) — SUPERADMIN-only, listar/crear/editar cuentas de administrador; requieren `Authorization: Bearer <token>` |
-| `POST /api/usuarios/sync` | Hace upsert en `Alumnos` (antes: tabla `Usuarios` separada) — mapea la carrera de texto libre del SIIA al catálogo automáticamente |
+| ~~`POST /api/usuarios/sync`~~ | **Eliminado** en DEC-030 (permitía tomar cuentas) |
 | `GET /api/usuarios` | Lee de `Alumnos` (alias `IdUsuario`/`Carrera` en el JSON para no romper `AdminUsersService.kt`); ahora incluye `ClaveCarrera` y `Semestre` |
 | `PUT /api/usuarios/:matricula/semestre` | (DEC-016) — admin-only, asigna el semestre de un alumno (1-12), deja auditoría |
 | `POST /api/usuarios` | **Nuevo** (DEC-017) — admin-only, alta de alumno sin contraseña (la crea el propio alumno al registrarse) |

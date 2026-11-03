@@ -1,5 +1,7 @@
 # Módulo 8: Horarios (carga por Excel)
 
+> ⛔ **Histórico (12/10/2026, DEC-043):** La carga de horarios se quitó de la app al pasar a usar solo la API del SIIA. El código está en el historial de git; esta nota se conserva como referencia.
+
 - **Estado:** ✅ Implementado y real — ver DEC-029.
 - **Ruta en App:** `Routes.ADMIN_HORARIOS` (admin) · sección "Materias y Horario de Hoy" en `Routes.DASHBOARD` (alumno, tab Inicio)
 - **Relacionado con:** [[MAPA_PROYECTO]], [[00_Dashboard]], [[06_PanelAdministrador]]
@@ -25,7 +27,7 @@ POST /api/horarios/importar (multipart, requireAdmin)
 dbo.Horarios (SQL Server)
    │
    ▼
-GET /api/mi-horario/{matricula} (x-api-key)
+GET /api/mi-horario/{matricula} (token del alumno)
    │  Resuelve carrera+semestre reales del alumno, filtra por el día de hoy,
    │  calcula estado (EN_CURSO/PROXIMA/TERMINADA) contra la hora actual
    ▼
@@ -55,7 +57,7 @@ Fila 1 = encabezados (sin distinguir mayúsculas/acentos):
 POST   /api/horarios/importar            (requireAdmin, multipart) → { filasImportadas, erroresFilas }
 GET    /api/horarios?claveCarrera=&semestre=  (requireAdmin) → lista completa (para revisar/borrar)
 DELETE /api/horarios/:id                 (requireAdmin)
-GET    /api/mi-horario/:matricula        (x-api-key) → { dia, clases: [{ materia, horaInicio, horaFin, profesor, aula, modalidad, estado }] }
+GET    /api/mi-horario/:matricula        (token del alumno) → { dia, clases: [{ materia, horaInicio, horaFin, profesor, aula, modalidad, estado }] }
 ```
 
 ---

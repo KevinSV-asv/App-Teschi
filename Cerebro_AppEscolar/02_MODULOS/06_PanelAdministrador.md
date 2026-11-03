@@ -1,7 +1,9 @@
 # Módulo 6: Panel de Administrador
 
+> ⛔ **Histórico (12/10/2026, DEC-043):** El panel de administrador se quitó de la app al pasar a usar solo la API del SIIA. El código está en el historial de git; esta nota se conserva como referencia.
+
 - **Estado:** ✅ Funcional — CRUD real contra `AppTeschiDB`, sin datos simulados
-- **Ruta en App:** `Routes.ADMIN_DASHBOARD` (hub) + `ADMIN_ALUMNOS`, `ADMIN_CALIFICACIONES`, `ADMIN_AUDITORIA`, `ADMIN_ESTADISTICAS`, `ADMIN_PROFILE/{matricula}`
+- **Ruta en App:** `Routes.ADMIN_DASHBOARD` (hub) + `ADMIN_ALUMNOS`, `ADMIN_CALIFICACIONES`, `ADMIN_AUDITORIA`, `ADMIN_ESTADISTICAS`, `ADMIN_ADMINISTRADORES`, `ADMIN_REINSCRIPCIONES`, `ADMIN_HORARIOS`, `ADMIN_PROFILE/{matricula}`
 - **Relacionado con:** [[MAPA_PROYECTO]], [[DECISIONES_TECNICAS]] DEC-017/DEC-018, [[02_Manual_Usuario_Administrador]], [[Base_Datos_Usuarios]]
 
 ---

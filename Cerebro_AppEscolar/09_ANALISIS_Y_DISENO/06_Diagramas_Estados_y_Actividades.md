@@ -1,5 +1,7 @@
 # Diagramas de Estados y de Actividades — AppTESCHI
 
+> ⚠️ **Desactualizado (12/10/2026, DEC-043):** describe el sistema con backend propio, base de datos y panel de administrador. Hoy la app solo tiene las pantallas del alumno con datos del SIIA (ver [[REGLAS_PROYECTO]] y [[MAPA_PROYECTO]]). Actualizar antes de entregarlo.
+
 > Ciclo de vida de las entidades clave y flujo paso a paso de los procesos más relevantes.
 > **Relacionado con:** [[01_Casos_de_Uso]], [[03_Diagramas_Secuencia]]
 

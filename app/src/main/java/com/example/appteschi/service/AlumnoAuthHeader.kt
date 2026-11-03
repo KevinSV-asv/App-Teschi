@@ -6,46 +6,37 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
-import okhttp3.Request
+
+/** Mensaje cuando el token del SIIA ya no sirve (venció a las 8 h o se cerró la sesión en el SIIA). */
+internal const val MENSAJE_SESION_EXPIRADA = "Tu sesión del SIIA expiró. Inicia sesión de nuevo."
 
 /**
- * Agrega el token de sesión del alumno (DEC-030) como
- * `Authorization: Bearer <token>`. Reemplaza a la x-api-key estática, que iba
- * compilada dentro del APK y no identificaba a nadie: con ella cualquiera que
- * conociera una matrícula podía leer o modificar los datos de ese alumno.
- * Si no hay token (usuarios de prueba sem1..sem9) no se manda el header.
- */
-fun Request.Builder.conSesionAlumno(): Request.Builder {
-    val token = UserSession.alumnoToken
-    return if (token.isNullOrBlank()) this else addHeader("Authorization", "Bearer $token")
-}
-
-/**
- * Cliente HTTP compartido por los servicios del alumno. Detecta cuando el
- * backend dice que la sesión venció o no es válida (respuesta 401 con el
- * header `X-Sesion-Invalida`, que solo manda `requireAlumno()` — otros 401,
- * como "contraseña actual incorrecta", no lo llevan), borra la sesión local y
- * avisa por [expirada] para que la app mande al alumno a iniciar sesión.
- * Sin esto, con el token vencido cada pantalla quedaba en "error + Reintentar"
- * sin forma de salir.
+ * Cliente HTTP para las consultas con el token del SIIA. Si el SIIA responde
+ * 401 a una petición que llevaba el token, la sesión ya no vale: se borra y se
+ * avisa por [expirada] para que la app mande al alumno a iniciar sesión, en vez
+ * de dejar cada pantalla en "error + Reintentar" sin salida.
+ *
+ * El cambio de NIP no usa este cliente: ahí un 401 puede significar
+ * "NIP actual incorrecto", no sesión vencida.
  */
 object SesionAlumno {
     private val _expirada = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val expirada: SharedFlow<Unit> = _expirada.asSharedFlow()
 
+    /** Borra la sesión local y avisa a la navegación. */
+    fun terminar() {
+        UserSession.limpiar()
+        _expirada.tryEmit(Unit)
+    }
+
     private val vigilante = Interceptor { chain ->
         val request = chain.request()
         val response = chain.proceed(request)
-        if (response.code == 401 &&
-            response.header("X-Sesion-Invalida") == "1" &&
-            request.header("Authorization") != null &&
-            UserSession.alumnoToken != null
-        ) {
-            UserSession.limpiar()
-            _expirada.tryEmit(Unit)
+        if (response.code == 401 && request.header("Authorization") != null && UserSession.token != null) {
+            terminar()
         }
         response
     }
 
-    val client: OkHttpClient by lazy { OkHttpClient.Builder().addInterceptor(TraduceErroresDeRed).addInterceptor(vigilante).build() }
+    val client: OkHttpClient by lazy { ClienteHttp.nuevo().newBuilder().addInterceptor(vigilante).build() }
 }

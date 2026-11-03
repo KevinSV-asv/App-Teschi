@@ -1,8 +1,10 @@
 # Consola Administrativa y Auditoria
 
+> ⛔ **Histórico (12/10/2026, DEC-043):** La auditoría administrativa se quitó de la app al pasar a usar solo la API del SIIA. El código está en el historial de git; esta nota se conserva como referencia.
+
 - **Fecha:** 27/08/2026
 - **Estado:** Primera version funcional en memoria
-- **Relacionado con:** [[MAPA_PROYECTO]], [[2FA_Login]], [[DECISIONES_TECNICAS]], [[03_Diseno_Login]]
+- **Relacionado con:** [[MAPA_PROYECTO]], [[2FA_Login]], [[DECISIONES_TECNICAS]]
 
 ## Vistas
 

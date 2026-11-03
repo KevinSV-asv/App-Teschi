@@ -4,6 +4,8 @@
 > Para el detalle completo de cada sesión ver [[05_AVANCES/24 de Agosto]].
 > **Relacionado con:** [[MAPA_PROYECTO]]
 
+> **Desde el 10/09/2026** los cambios se documentan principalmente en [[DECISIONES_TECNICAS]] (DEC-020 en adelante) y en `05_AVANCES`; aquí solo se agregan resúmenes por versión.
+
 ---
 
 ## v0.1 — 21/08/2026 · Estructura base
@@ -595,3 +597,325 @@ Bug reportado por el usuario al probar el APK de v0.24: el botón "Ya tengo un c
 - Túnel Cloudflare verificado (`/health` → 200) antes de compilar
 - APK reconstruido (`assembleDebug`) y enviado al usuario
 - Cambio puramente de cliente — no requirió tocar `server.js` ni reiniciar el backend
+
+---
+
+## v0.26 — 25/09/2026 → 27/09/2026 · Login real con la API oficial del SIIA
+
+Commits `3bbb1a9` (25/09) y `acd8ffa` (27/09) en `App-Teschi`. Decisiones: DEC-035, DEC-036, DEC-037.
+
+### Cambios aplicados
+
+| Archivo | Tipo | Cambio |
+|---|---|---|
+| `server.js` | Modificado | `/api/auth/siia` llama a `login.ashx` (`loginSiiaReal()`), `mapTipoSiia()` con `E/D/A`, sin alta automática (404 si la matrícula no existe), guarda `UsuarioSiia`, enlaza la carrera por `IdCarreraSiia`; `/api/otp/enviar` usa el correo guardado en el servidor |
+| `service/SiiaAuthService.kt` | Modificado | Lee `identificador` de la respuesta (BUG-017) |
+| `viewmodel/AuthViewModel.kt` | Modificado | No exige correo escrito en el flujo SIIA |
+| `ui/login/LoginScreen.kt` | Modificado | En el flujo SIIA la verificación muestra el correo enmascarado, sin campo editable |
+| `deploy/*.sh` + `.gitattributes` | Modificado / nuevo | Saltos LF obligatorios en scripts de shell (BUG-018) |
+| `04_BASE_DATOS/sql/24_VinculoSiia.sql`, `25_MapeoCarrerasSiia.sql` | Nuevos en el repo | Esquema del vínculo SIIA y equivalencias de carrera |
+| `Postman_Collection_AppTeschi.json` | Modificado | Carpetas "SIIA - Login real" y "SIIA - API real (directa)"; fuera `/api/usuarios/sync` y la `x-api-key` |
+
+### Verificación
+
+- Login real en el teléfono con un alumno de ISC: SIIA → código por correo institucional (Microsoft Graph) → dashboard.
+- `login.ashx` probado directo en Postman (200 con datos reales).
+- Pendiente: desplegar `acd8ffa` en el servidor.
+
+---
+
+## v0.27 — 28/09/2026 · Código 2FA automático + blindaje del login SIIA
+
+| Archivo | Cambio |
+|---|---|
+| `viewmodel/AuthViewModel.kt` | Al entrar a la verificación con correo conocido, envía el código solo. Si faltan matrícula o ticket, no llama al backend y pide volver a iniciar sesión (BUG-021) |
+| `data/repository/AuthRepository.kt` | Login SIIA: si falta `identificador`, usa el usuario escrito. `CuentaPropiaRequiereOtp` lleva `correoEnmascarado` |
+| `service/LocalAccountAuthService.kt` | Lee `correoEnmascarado` de `/api/auth/cuenta` |
+| `ui/login/LoginScreen.kt` | Textos "Enviando / Te enviamos un código a: …"; versión y fecha de compilación en el pie |
+| `server.js` | `/api/auth/cuenta` devuelve `correoEnmascarado` si el alumno tiene correo guardado |
+| `app/build.gradle.kts` | `versionName 1.1`, `FECHA_COMPILACION` |
+| `AuthViewModelTest.kt` | 5 pruebas nuevas; 6 existentes pasan por el login antes de pedir el código |
+
+Pendiente: desplegar `server.js` para que la cuenta propia también envíe el código sola (el login por SIIA ya funciona así con el servidor actual).
+
+---
+
+## v0.28 — 28/09/2026 · Logo oficial de la app + botón "Descargar PDF" en el Kardex
+
+Pedido del alumno: usar su logo (birrete + libro, "TESCHI — Tu vida escolar en un solo lugar") al abrir la app y en Inicio, y hacer más visible la descarga del Kardex.
+
+| Archivo | Cambio |
+|---|---|
+| `res/mipmap-*/ic_launcher_{foreground,background}.webp` (nuevos) · `mipmap-anydpi-v26/ic_launcher*.xml` | Ícono adaptativo con el logo: el arte (sin la leyenda, ilegible a ese tamaño) dentro de la zona segura de 66 dp sobre el degradado verde del logo. `monochrome` usa el mismo arte (íconos temáticos de Android 13+) |
+| `res/mipmap-*/ic_launcher{,_round}.webp` | Íconos de legado (API < 26) con el logo |
+| `res/drawable/ic_launcher_{foreground,background}.xml` | Borrados: eran el robot de Android por defecto |
+| `res/drawable-nodpi/logo_appteschi.png`, `splash_logo.png` (nuevos) | Logo con esquinas transparentes para la app y para el arranque (cabe en el círculo de 192 dp del splash) |
+| `values/themes.xml`, `AndroidManifest.xml`, `MainActivity.kt` | Pantalla de arranque con `core-splashscreen` (`Theme.AppTeschi.Arranque`, fondo blanco + logo), igual en todas las versiones desde API 24 |
+| `gradle/libs.versions.toml`, `app/build.gradle.kts` | Dependencia `androidx.core:core-splashscreen:1.0.1` |
+| `ui/login/LoginScreen.kt` | El pie verde muestra el logo en lugar del recuadro de texto "TESChi" |
+| `ui/dashboard/DashboardScreen.kt` | La cabecera de Inicio muestra el logo en lugar del ícono genérico de birrete |
+| `ui/modules/KardexScreen.kt` | El ícono suelto de descarga pasa a un botón blanco "⬇ Descargar PDF" en la barra verde |
+
+Los recursos se generaron con un script a partir de la imagen del alumno (separación del arte por color y fondo reconstruido sin rastros del dibujo); el PDF del Kardex conserva los logos oficiales (`logo_teschi`, `logo_gobierno_edomex`).
+
+### Verificación
+
+- Compilación, 118/118 pruebas unitarias y `assembleDebug` correctos; `aapt2` confirma el ícono adaptativo, sus capas en todas las densidades y los dos logos dentro del APK.
+- Vistas previas del ícono con máscara circular y redondeada revisadas.
+- ⏳ **Falta verlo en el teléfono:** se desconectó de la depuración inalámbrica antes de instalar.
+- ✅ Visto después en una captura del alumno: el logo aparece en el pie del login.
+
+---
+
+## v0.29 — 28/09/2026 · Alumno registrado sin correo ya puede entrar por el SIIA
+
+Bug: BUG-022. Se intentó y se revirtió el mismo día el alta automática de alumnos (DEC-039): sigue vigente DEC-036, un alumno que el SIIA valida pero que no está en AppTESCHI recibe "Tu matrícula todavía no está registrada" y un administrador lo da de alta.
+
+| Archivo | Cambio |
+|---|---|
+| `server.js` — `/api/auth/siia` | Sin correo guardado responde con ticket y `correoEnmascarado` vacío (antes `requiereCorreo` sin ticket, que dejaba al alumno sin poder pedir el código). Los logs registran el `area` del SIIA (antes un campo `carrera` que no existe) |
+| `server.js` — `/api/otp/verificar` | Al verificar el código de un alumno sin ningún correo guardado, guarda como `CorreoOtp` el correo al que se envió |
+
+La app no cambia: ya maneja `correoEnmascarado` vacío (pide el correo en la verificación). `SiiaRequiereCorreo` queda sin uso cuando el servidor tenga este cambio.
+
+### Verificación
+
+- Prueba local con SIIA simulado (HTTPS propio) y la base de desarrollo, 13/13: no registrado → 404 sin crear nada; registrado → ticket y correo enmascarado, se vincula `UsuarioSiia`; sin carrera mapeada → `cuentaPendiente`; sin correo → ticket y correo vacío, código incorrecto no guarda el correo, código correcto da token y lo guarda, el siguiente login ya lo trae; un correo existente no se reemplaza; contraseña incorrecta y usuario inexistente → 401. Datos de prueba borrados. A la base de la laptop se le aplicaron `24_VinculoSiia.sql` y `25_MapeoCarrerasSiia.sql`, que no tenía.
+- ⏳ Falta desplegar en el servidor (junto con `acd8ffa` y el `server.js` de v0.27, que seguían pendientes).
+
+---
+
+## v0.30 — 28/09/2026 · Cualquier alumno del SIIA entra sin registro local + fecha de compilación real
+
+Decisión: DEC-040. Bug: BUG-023.
+
+| Archivo | Cambio |
+|---|---|
+| `server.js` — `/api/auth/siia` | Alumno validado por el SIIA que no está en `Alumnos`: responde ticket + `sinRegistro: true` y guarda sus datos del SIIA solo en memoria (`sesionesSinRegistro`); ya no 404 |
+| `server.js` — `/api/otp/enviar`, `/api/otp/verificar` | Para esos alumnos el código vive en memoria (10 min, 5 intentos, reusable); al verificar se emite un token de alumno con `sinRegistro: true` (`firmarTokenAlumnoSinRegistro`) |
+| `server.js` — `/api/mi-perfil`, `/api/mi-historial`, `/api/mi-horario`, `/api/reinscripcion/*`, cambiar contraseña | Con token sin registro: el perfil devuelve los datos del SIIA; lo demás responde 409 con `MENSAJE_SIN_REGISTRO` (`alumnoNoEncontrado`) |
+| `ui/modules/KardexScreen.kt` | "Descargar PDF" deshabilitado si el Kardex muestra un error (antes generaba un PDF vacío) |
+| `app/build.gradle.kts` | `FECHA_COMPILACION` desde un `ValueSource` (BUG-023) |
+
+La app no necesitó más cambios: sus servicios ya muestran el mensaje de error del servidor y el perfil acepta campos vacíos.
+
+### Verificación
+
+- Backend: prueba local con SIIA simulado, base de desarrollo y correo interceptado, 26/26 (detalle en DEC-040).
+- App: 118/118 pruebas, APK instalado en el teléfono; vistos el arranque con el logo, el ícono nuevo y la fecha de compilación correcta en el login.
+- ⏳ Falta desplegar `server.js` para probar con un alumno real no registrado. (Desplegado por el alumno el 28/09/2026.)
+
+---
+
+## v0.31 — 29/09/2026 · Login del SIIA con NIP (API 1.1)
+
+Decisión: DEC-041.
+
+| Archivo | Cambio |
+|---|---|
+| `server.js` | `/api/auth/siia` detecta `requiereNip` y responde `ticketNip` (el `tempToken` del SIIA queda en memoria, `loginsNipPendientes`). Nuevos `POST /api/auth/siia/nip` (verificar o crear NIP → sesión de AppTESCHI directa) y `POST /api/auth/siia/nip/recuperar` (por CURP). La clasificación del usuario del SIIA pasó a `resolverUsuarioSiia()` para compartirla entre ambos flujos; `loginSiiaReal()` → `postSiia()` genérico. `tipo P` = docente |
+| `service/SiiaAuthService.kt` | `SiiaLoginResultado.RequiereNip`; nuevo `SiiaNipResultado`; métodos `nip()` y `recuperarNip()` |
+| `core/config/ApiConfig.kt` | `authSiiaNip`, `authSiiaNipRecuperar` |
+| `data/repository/AuthRepository.kt` | `LoginResultado.SiiaRequiereNip`; `verificarNipSiia`, `crearNipSiia`, `recuperarNipSiia` |
+| `viewmodel/AuthViewModel.kt` | `LoginPaso.NIP`; `verificarNip`, `crearNip`, `recuperarNip`; con NIP correcto establece la sesión y va al dashboard |
+| `ui/login/LoginScreen.kt` | `NipSection`: "NIP del SIIA" (4 dígitos) o "Crea tu NIP" (nuevo + confirmación); "¿Olvidaste tu NIP?" con CURP |
+| `AuthFakes.kt`, `AuthViewModelTest.kt` | Fake con NIP y 7 pruebas nuevas |
+
+### Verificación
+
+- Backend: 27/27 con SIIA simulado de la API 1.1 (detalle en DEC-041).
+- App: 125/125 pruebas, `assembleDebug` correcto (compilada 29/09/2026 14:15).
+- ⏳ Falta desplegar `server.js` e instalar el APK; luego probar con la cuenta real del alumno (primero creará su NIP en la app).
+
+---
+
+## v0.32 — 30/09/2026 · Calificaciones parciales del SIIA
+
+Decisión: DEC-042.
+
+| Archivo | Cambio |
+|---|---|
+| `server.js` | `sesionesSiia` (token final del SIIA en memoria por `sid`); `/api/auth/siia/nip` lo guarda y firma el JWT con `sid`; `llamarSiia()` genérico (GET con token); nuevo `GET /api/mi-calificaciones-siia` que consulta `calificaciones/parciales.ashx` |
+| `data/UserSession.kt` | `sesionSiia` (persistido) |
+| `viewmodel/AuthViewModel.kt` | Marca `sesionSiia = true` al entrar con NIP |
+| `service/CalificacionesSiiaService.kt` (nuevo) | Llamada, modelos (`CalificacionesParciales`, `MateriaParcial`, `EstatusParcial`) y `parsearCalificacionesParciales` |
+| `core/config/ApiConfig.kt` | `misCalificacionesSiia(periodo)` |
+| `viewmodel/CalificacionesViewModel.kt` | Con `sesionSiia` usa las parciales del SIIA; `seleccionarPeriodo`; si el servidor dice `SIN_SIIA`, cae al historial de AppTeschiDB |
+| `ui/modules/CalificacionesScreen.kt` | Vista de parciales: periodo y selector, resumen (promedio parcial, evaluadas, aprobatorias/reprobatorias), tarjeta por materia con profesor, grupo, Parcial 1/2/3, promedio y estatus; aviso de bloqueo con trámites pendientes |
+| Pruebas | `CalificacionesSiiaParserTest` (3), 5 en `CalificacionesViewModelTest`, `sesionSiia` en `AuthViewModelTest` |
+
+### Verificación
+
+- Backend: 15/15 con SIIA simulado + regresión de NIP 27/27.
+- App: 133/133 pruebas, `assembleDebug` correcto (compilada 30/09/2026 09:19).
+- ⏳ No se vio la pantalla en el teléfono (no estaba conectado y hace falta una sesión real del SIIA). Falta desplegar `server.js`.
+
+---
+
+## v0.33 — 30/09/2026 · Calificaciones: "No fue posible procesar la solicitud." (BUG-024)
+
+| Archivo | Cambio |
+|---|---|
+| `server.js` | `User-Agent` en todas las llamadas al SIIA; error de calificaciones que aclara que respondió el SIIA y log con status + respuesta; si la consulta sin periodo falla con error genérico, reintenta con `periodosRecientes()` y responde `aviso` |
+| `Postman_Collection_AppTeschi.json` | Variable `siia_nip`, `nip` en "1. Login (SIIA real)" y nueva "5. Calificaciones parciales" |
+| `service/CalificacionesSiiaService.kt` | Lee `aviso` |
+| `viewmodel/CalificacionesViewModel.kt` | `errorPeriodo`: si falla un periodo elegido se conservan las parciales anteriores |
+| `ui/modules/CalificacionesScreen.kt` | `AvisoCalificaciones` para el aviso del servidor y el error de periodo |
+| Pruebas | Parser (aviso) y ViewModel (periodo que falla) |
+
+### Verificación
+
+- Backend 23/23 con SIIA simulado (incluye el caso "falla el periodo actual, responde el anterior") y NIP 27/27. App 135/135; APK (30/09/2026 10:05) instalado en el teléfono.
+- ⏳ Falta desplegar `server.js` y confirmar con la cuenta real.
+
+---
+
+## v0.34 — 05/10/2026 · SIIA corregido por la escuela: ajuste a su respuesta real + Postman
+
+BUG-024 resuelto del lado del SIIA.
+
+| Archivo | Cambio |
+|---|---|
+| `server.js` | `/api/mi-calificaciones-siia`: un 200 del SIIA es éxito salvo `ok: false` (la respuesta real no trae `ok` al inicio); `bloqueado: true` se respeta con 403 o con 200 |
+| `Postman_Collection_AppTeschi.json` | Carpeta "SIIA - Login real (AppTESCHI)" rehecha con el flujo actual: 1. Login SIIA → 2. Verificar NIP → 3. Crear NIP (solo primera vez) → 4. Mis calificaciones parciales; las del código por correo quedan como "(Sin NIP)". Variable `ticketNip`. En "SIIA - API real (directa)": 6. Login con matrícula + NIP (`login-nip.ashx`, nuevo en el SIIA) |
+
+La app no cambia: el APK del 30/09/2026 ya trae Calificaciones con las parciales del SIIA.
+
+### Verificación
+
+- SIIA real en Postman (05/10/2026): calificaciones con `periodo=2025-2` → 200 con datos.
+- Backend con SIIA simulado que responde como el real (sin `ok`): 24/24; NIP 27/27.
+- ⏳ Falta desplegar `server.js` y verlo en el teléfono.
+
+
+---
+
+## v0.35 — 12/10/2026 · La app habla directo con el SIIA (sin servidor) — app 2.0
+
+DEC-043. Ya no se usa `AppTeschi.Api` ni `AppTeschiDB`: la app llama a la API oficial del SIIA y funciona sin Tailscale.
+
+| Archivo | Cambio |
+|---|---|
+| `core/config/ApiConfig.kt` | Solo la URL del SIIA (`SIIA_BASE_URL`) y `SiiaEndpoints` (login, nip, calificaciones). Sin URL configurable ni `BuildConfig.API_BASE_URL` |
+| `service/SiiaAuthService.kt` | `SiiaHttpAuthService`: `login.ashx` y `nip.ashx` (`verificar`, `configurar`, `recuperar`, `cambiar`) directo al SIIA; `SesionSiia` con el token final y la cuenta |
+| `service/CalificacionesSiiaService.kt` | `CalificacionesSiiaHttp`: `calificaciones/parciales.ashx` con `Bearer`; reintento con periodos recientes, bloqueo como aviso y lectura de `verificaciones.pendientes` (antes lo hacía el backend) |
+| `service/AlumnoAuthHeader.kt` | `SesionAlumno`: un 401 del SIIA borra la sesión y manda al login |
+| `service/ClienteHttp.kt` | `Accept` y `User-Agent: AppTESCHI-Android/2.0`; mensajes de red hablan del SIIA, sin Tailscale |
+| `data/UserSession.kt`, `data/CuentaSiia.kt` | Sesión = token del SIIA + vencimiento + datos de la cuenta; borra las claves de la sesión anterior |
+| `data/repository/AuthRepository.kt`, `viewmodel/AuthViewModel.kt` | Login en dos pasos: contraseña → NIP; solo alumnos (`tipo = E`) |
+| `ui/login/LoginScreen.kt` | Sin OTP, registro, "¿Olvidaste tu contraseña?" ni diálogo "⚙ Servidor" |
+| `ui/dashboard/DashboardScreen.kt`, `viewmodel/InicioViewModel.kt` | Inicio con datos del SIIA y resumen del periodo actual (sin horario de hoy) |
+| `ui/modules/TiraMateriasScreen.kt`, `viewmodel/TiraMateriasViewModel.kt` | Materias del periodo actual tomadas de las parciales del SIIA (materia, profesor, grupo) |
+| `ui/modules/CalificacionesScreen.kt`, `viewmodel/CalificacionesViewModel.kt` | Solo parciales del SIIA (sin historial de la base) |
+| `ui/dashboard/PerfilAlumnoScreen.kt`, `viewmodel/PerfilAlumnoViewModel.kt` | Datos del SIIA, cambio de NIP y cerrar sesión |
+| `ui/modules/EnConstruccionScreen.kt` (nuevo) | Kardex e Intersemestral: "Estamos trabajando en este apartado" |
+| `MainActivity.kt`, `ui/dashboard/BottomNavBar.kt` | Solo rutas del alumno; 5 pestañas; con token vigente abre directo en Inicio |
+| `AndroidManifest.xml`, `res/xml/*` | `usesCleartextTraffic="false"`; sin permisos de ubicación ni `FileProvider`; la sesión no entra al respaldo |
+| `app/build.gradle.kts` | Sin `API_BASE_URL` ni lectura de `local.properties`; versión **2.0** (código 3) |
+
+**Eliminados (55 archivos):** pantallas, ViewModels y servicios del panel de administrador, Reinscripción, Registro, recuperar contraseña, OTP, cuentas propias, horarios, perfil del backend, plan de estudios, historial/Kardex de la base y su PDF (`pdf/`), `AppError`, `AppContextHolder`, `AuditTrail`, `InMemoryCookieJar`, `GruposIsc`, `PlanDeEstudiosIsc`, `res/xml/file_paths.xml` y sus pruebas.
+
+### Verificación
+
+- `testDebugUnitTest`: **86/86** (nuevas: `SiiaHttpAuthServiceTest` y `CalificacionesSiiaHttpTest` contra un SIIA simulado con MockWebServer, `UserSessionTest`; reescritas las de login, calificaciones, tira, inicio y perfil). `assembleDebug` correcto.
+- El SIIA responde directo desde internet: `parciales.ashx` sin token → 401 "Token requerido o inválido…" (12/10/2026).
+- ⏳ Falta probar en el teléfono con una cuenta real (contraseña + NIP).
+
+---
+
+## v0.36 — 02/11/2026 · Calificaciones finales y Kardex del SIIA (API 1.2) — app 2.1
+
+DEC-044. Tres endpoints nuevos, directo al SIIA con `Bearer`. El login no cambia.
+
+| Archivo | Cambio |
+|---|---|
+| `core/config/ApiConfig.kt` | `calificacionesFinales(periodo)`, `kardex` y `kardexPdf` en `SiiaEndpoints` |
+| `service/CalificacionesSiiaService.kt` | `finales(periodo)` con las mismas reglas que las parciales (reintento de periodos, bloqueo como aviso); `errorDeConsulta` compartido; `parsearCalificacionesFinales` acepta los nombres alternos del SIIA; `textoCalificacion` conserva textos como `ACA` |
+| `service/KardexSiiaService.kt` (nuevo) | `kardex()` y `kardexPdf()`; `parsearKardex` (sin CURP ni foto), PDF validado y nombre de archivo limpio; tiempo de lectura de 60 s |
+| `viewmodel/CalificacionesViewModel.kt` | `VistaCalificaciones` (Parciales / Finales), carga al abrir la vista, periodo compartido entre vistas |
+| `viewmodel/KardexViewModel.kt` (nuevo) | Carga, reintento, filtro por semestre y flujo del PDF (descargar → elegir destino → guardar) |
+| `ui/modules/CalificacionesScreen.kt` | Selector Parciales / Finales, `FinalesSiia`, `ResumenFinalCard`, `MateriaFinalCard`; piezas comunes separadas |
+| `ui/modules/KardexScreen.kt` (nuevo) | Diseño de Stitch con datos reales: alumno, promedio, créditos, contadores, gráfica, filtro, materias, simbología y botón "Descargar PDF" |
+| `ui/modules/EnConstruccionScreen.kt` | Solo queda Intersemestral |
+| `ui/dashboard/DashboardScreen.kt` | El texto de Inicio ya menciona el kardex |
+| `app/build.gradle.kts` | Versión **2.1** (código 4) |
+| `01_APIS_POSTMAN/SIIA_Alumno.postman_collection.json` (nuevo) | Colección con el flujo de la app y verificaciones por petición, sin secretos |
+
+### Verificación
+
+- `testDebugUnitTest`: **134/134** (nuevas: `KardexSiiaHttpTest`, `KardexSiiaParserTest`, `KardexViewModelTest` y casos de finales en las de calificaciones y `ApiConfigTest`). Las pruebas encontraron que dos toques seguidos podían pedir dos descargas; corregido.
+- Colección de Postman con Newman contra un SIIA falso local: **26/26**. Newman encontró un error de la primera versión: la variable `data` choca con una interna de Postman; corregido.
+- Emulador (Android 17) con una copia temporal de la app contra el SIIA falso: login, Finales, Kardex, filtro, guardar y abrir el PDF, bloqueo por trámites, error con Reintentar y sesión vencida. Sin cierres inesperados de la app.
+- SIIA real: `finales.ashx`, `kardex.ashx` y `kardex-pdf.ashx` responden 401 sin token.
+- ⏳ Falta probar con una cuenta real (Postman y teléfono).
+
+---
+
+## v0.37 — 02/11/2026 · Kardex con los mismos datos que el original — app 2.2
+
+DEC-045. Mismo diseño; se agregan los datos del historial académico oficial que faltaban.
+
+| Archivo | Cambio |
+|---|---|
+| `service/KardexSiiaService.kt` | `DatosKardex` con CURP, grupo, promedio del semestre anterior, parcial, descuento, créditos por cursar, total de materias y por aprobar; `MateriaKardex.numero`; `EstatusKardex.clave` (AP / NA / PC); `fechaElaboracion` |
+| `ui/modules/KardexScreen.kt` | `EncabezadoInstitucional`, `TarjetaResumen`, cuatro contadores (Aprobadas, Reprobadas, Por aprobar, Por cursar), CURP y grupo, "No." y clave en cada materia, "Período" como en el original |
+| `res/drawable-nodpi/logo_teschi_encabezado.png` (nuevo) | Logo del TESCHI sin fondo gris |
+| `01_APIS_POSTMAN/SIIA_Alumno.postman_collection.json` | La petición 5 comprueba que lleguen los demás datos del encabezado |
+| `app/build.gradle.kts` | Versión **2.2** (código 5) |
+
+### Verificación
+
+- `testDebugUnitTest`: **138/138**.
+- Colección con Newman contra el SIIA falso: **27/27**.
+- Kardex revisado en emulador con datos ficticios.
+- ⏳ Falta comparar con una cuenta real contra el PDF completo.
+
+---
+
+## v0.38 — 02/11/2026 · Reinscripción en la barra y "Seguridad de la Cuenta" en Mi perfil — app 2.3
+
+DEC-046 y DEC-047.
+
+| Archivo | Cambio |
+|---|---|
+| `ui/modules/ReinscripcionScreen.kt` (nuevo) | Selector Reinscripción / Intersemestral; ambas "Estamos trabajando en este apartado" |
+| `ui/modules/EnConstruccionScreen.kt` | Eliminado |
+| `MainActivity.kt`, `ui/dashboard/BottomNavBar.kt` | `Routes.REINSCRIPCION` en lugar de `Routes.INTERSEMESTRAL`; pestaña "Reinscrip." en el mismo lugar |
+| `ui/dashboard/PerfilAlumnoScreen.kt` | Rediseño con el estilo del portal: encabezado, selector de sección, tarjetas de contraseña (apagada, con enlace al portal) y NIP, requisitos |
+| `viewmodel/PerfilAlumnoViewModel.kt` | `SeccionSeguridad`; `cambiarNip` recibe la contraseña y la comprueba con `login.ashx` antes de cambiar el NIP |
+| `core/config/ApiConfig.kt` | `SIIA_PORTAL_URL` |
+| `ui/theme/Color.kt` | `SecurityTeal`, `SecurityBlueContainer`, `OnSecurityBlue`, `SlateBorder`, `SlateSurface` |
+| `app/build.gradle.kts` | Versión **2.3** (código 6) |
+
+### Verificación
+
+- `testDebugUnitTest`: **142/142**.
+- Emulador con una copia temporal contra un SIIA falso: Reinscripción e Intersemestral; contraseña incorrecta, NIP incorrecto y cambio correcto; secciones; el botón abre el portal en el navegador. Sin cierres inesperados de la app.
+- ⏳ Falta probar el cambio de NIP con una cuenta real.
+
+---
+
+## v0.39 — 02/11/2026 · Foto de perfil y sin "SIIA · Sesión activa" — app 2.4
+
+DEC-048.
+
+| Archivo | Cambio |
+|---|---|
+| `data/FotoPerfil.kt` (nuevo) | `FotoPerfilStore` y `FotoPerfilArchivos`: guarda un JPEG cuadrado de 512 px en el almacenamiento privado, por cuenta |
+| `viewmodel/PerfilAlumnoViewModel.kt` | `cambiarFoto`, `quitarFoto`, `errorFotoMostrado`; sin `sesionActiva` |
+| `ui/dashboard/PerfilAlumnoScreen.kt` | `FotoAlumno`: foto, botón de cámara, selector de Android y menú Cambiar / Quitar; sin la insignia de sesión |
+| `MainActivity.kt` | `FotoPerfilArchivos.init` al arrancar |
+| `res/xml/backup_rules.xml`, `data_extraction_rules.xml` | La carpeta `fotos_perfil/` queda fuera de respaldos y copias |
+| `app/build.gradle.kts` | Versión **2.4** (código 7) |
+
+### Verificación
+
+- `testDebugUnitTest`: **155/155** (nuevas: `FotoPerfilTest` y casos de foto en `PerfilAlumnoViewModelTest`).
+- Emulador (Android 17) con imágenes ficticias:
+  - El selector abre sin pedir permisos.
+  - Una foto de cámara girada, con GPS en sus metadatos, queda derecha y centrada: JPEG de 512×512 sin EXIF ni GPS.
+  - Un PNG transparente queda con fondo blanco.
+  - El menú Cambiar / Quitar funciona; quitar la foto borra el archivo.
+  - La foto sigue al reabrir la app y al cerrar sesión y volver a entrar.
+  - Sin cierres inesperados de la app.
+  - No se probó en un teléfono físico.

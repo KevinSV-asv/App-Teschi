@@ -5,6 +5,7 @@ kotlin               = "2.0.21"
 coreKtx              = "1.13.1"
 lifecycleRuntimeKtx  = "2.8.4"
 activityCompose      = "1.9.1"
+coreSplashscreen     = "1.0.1"
 
 # ── Compose ───────────────────────────────────────────────────────────────────
 composeBom           = "2024.12.01"
@@ -27,6 +28,7 @@ okhttp               = "4.12.0"
 androidx-core-ktx              = { group = "androidx.core",      name = "core-ktx",              version.ref = "coreKtx" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
 androidx-activity-compose      = { group = "androidx.activity",  name = "activity-compose",       version.ref = "activityCompose" }
+androidx-core-splashscreen     = { group = "androidx.core",      name = "core-splashscreen",      version.ref = "coreSplashscreen" }
 
 # ── Compose BOM + UI ──────────────────────────────────────────────────────────
 androidx-compose-bom                = { group = "androidx.compose",          name = "compose-bom",          version.ref = "composeBom" }

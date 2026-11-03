@@ -1,5 +1,9 @@
 # Módulo 1: Reinscripción
 
+> 🔴 **Desde el 02/11/2026 (DEC-046):** Reinscripción volvió como pestaña, con Intersemestral dentro, pero muestra "Estamos trabajando en este apartado": la API del SIIA no tiene datos de reinscripción.
+>
+> ⛔ **Lo de abajo es histórico:** describe el flujo anterior, que dependía de `AppTeschiDB` y se quitó en DEC-043. El código está en el historial de git.
+
 - **Estado:** Fases 1 y 2 completas — flujo del alumno y panel del director/control escolar 100% reales (ver secciones al final).
 - **Ruta en App:** `Routes.REINSCRIPCION`
 - **Relacionado con:** [[MAPA_PROYECTO]], [[2FA_Login]]
@@ -39,7 +43,7 @@ Permite al alumno realizar o consultar su reinscripción al periodo siguiente. E
 
 ## Endpoint API
 
-> ⚠️ **PENDIENTE** — Ver [[01_APIS_POSTMAN]] cuando se documente.
+> Diseño original. Los endpoints reales están en [[Base_Datos_Usuarios]] §"Endpoints de `server.js`" y en la colección de Postman ([[01_POSTMAN_API]]).
 
 ```
 GET  /api/alumnos/{matricula}/estatus-reinscripcion
@@ -121,8 +125,8 @@ Se reemplazó por completo la maqueta anterior. Ya no hay comprobante de pago
 en el flujo (no aparece en el portal real del SIIA — se corrigió tras
 comparar contra una captura real de "Ins-Reinscripción en línea").
 
-**Endpoints reales** (`server.js`, sin JWT de admin — el alumno no tiene
-sesión propia, se protegen con `x-api-key` como `/api/otp/enviar`):
+**Endpoints reales** (`server.js`; desde DEC-030 se protegen con el token de
+sesión del alumno, `requireAlumno()`):
 
 ```
 GET  /api/reinscripcion/estatus/:matricula
@@ -140,7 +144,7 @@ POST /api/reinscripcion/solicitud   { matricula, claveGrupo }
 - Si es irregular, el alumno elige entre todos los grupos de su
   carrera/semestre (`GET .../grupos`, misma tabla que usa PlanEstudiosService).
 - El envío ya persiste de verdad en `dbo.SolicitudesReinscripcion`
-  (`database/sql/19_SolicitudesReinscripcion.sql`) con folio real y
+  (`04_BASE_DATOS/sql/19_SolicitudesReinscripcion.sql`) con folio real y
   `Estatus = PENDIENTE` — la app ya no inventa un folio local.
 - **Se detectó y corrigió un hueco de datos**: `dbo.HistorialAcademico` no
   tenía ninguna fila para el alumno real que se usó para probarlo (matrícula
@@ -156,7 +160,7 @@ POST /api/reinscripcion/solicitud   { matricula, claveGrupo }
 ## Fase 2 — bloqueo por reglamento y panel del director (15/09/2026)
 
 **Tabla nueva:** `dbo.ObservacionesReglamento`
-(`database/sql/22_ObservacionesReglamento.sql`) — `IdAlumno`, `Motivo`,
+(`04_BASE_DATOS/sql/22_ObservacionesReglamento.sql`) — `IdAlumno`, `Motivo`,
 `Estado` (PENDIENTE/AUTORIZADA/RECHAZADA), `RegistradaPor`, `FechaRegistro`,
 `ResueltaPor`, `FechaResolucion`, `Resolucion`.
 

@@ -1,5 +1,7 @@
 # Manual de Usuario — Alumno
 
+> ⚠️ **Desactualizado (12/10/2026, DEC-043):** describe el sistema con backend propio, base de datos y panel de administrador. Hoy la app solo tiene las pantallas del alumno con datos del SIIA (ver [[REGLAS_PROYECTO]] y [[MAPA_PROYECTO]]). Actualizar antes de entregarlo.
+
 > Guía de uso de AppTESCHI para estudiantes. No requiere conocimientos técnicos.
 > **Relacionado con:** [[02_Manual_Usuario_Administrador]], [[00_Vision_y_Alcance]]
 
@@ -18,20 +20,41 @@
 
 ## 2. Iniciar sesión
 
-1. Captura tu matrícula y contraseña.
-2. Si tus credenciales son válidas, la app te pedirá un **correo de contacto** para enviarte un código de verificación (OTP).
-3. Revisa tu bandeja de entrada (y spam) — llegará un código de 6 dígitos, válido por 10 minutos.
-4. Captura el código. Si no te llegó o expiró, toca **"Reenviar código"**.
-5. Al validarse el código, entras directamente a tu **Dashboard**.
+Hay un solo formulario. Puedes entrar con tu usuario y contraseña del **SIIA** (los del portal de la escuela) o con la matrícula y contraseña de tu **cuenta de AppTESCHI** (sección 1); la app reconoce sola cuál es.
 
-> Si tu matrícula y contraseña coinciden con tu cuenta del portal institucional (SIIA), también puedes entrar con esas mismas credenciales — la app las valida automáticamente sin que tengas que hacer nada distinto.
+**Con tu usuario del SIIA**
+
+1. Escribe tu matrícula y tu contraseña del SIIA, y toca **Iniciar sesión**.
+2. Escribe tu **NIP del SIIA** (4 dígitos) y toca **Entrar**.
+   - Si todavía no tienes NIP, la app te pide crearlo: escríbelo dos veces y toca **Crear NIP y entrar**. Es el mismo NIP que te pedirá el portal del SIIA.
+   - Si lo olvidaste, toca **¿Olvidaste tu NIP?**, escribe tu CURP y el SIIA te lo manda a tu correo institucional.
+3. Entras a tu **Inicio**. Con el SIIA no hay código por correo: el NIP ya es tu segundo paso de seguridad.
+
+**Con tu cuenta de AppTESCHI**
+
+1. Escribe tu matrícula y tu contraseña, y toca **Iniciar sesión**.
+2. La app te envía sola un código de 6 dígitos y te muestra a qué correo (parcialmente oculto). Revisa también spam; el código vale 10 minutos.
+3. Escribe el código. Si no llegó o expiró, toca **Reenviar código**.
+4. Entras a tu **Inicio**.
+
+**Mensajes que puedes ver**
+
+| Mensaje | Qué significa |
+|---|---|
+| "Entraste con tu cuenta del SIIA, pero aún no tienes registro en AppTESCHI" | Entraste bien, pero control escolar todavía no carga tus datos académicos en la app. Pídeselo al administrador; mientras, ves tu nombre, carrera y correo del SIIA |
+| "Tu cuenta está pendiente" | Tu carrera todavía no está conectada con el SIIA. Avísale al administrador; en cuanto la conecte podrás entrar |
+| "NIP incorrecto" | Revisa tu NIP. Después de 5 intentos tendrás que volver a escribir tu contraseña |
+| "Demasiados intentos" | Espera uno o dos minutos antes de volver a intentar |
+| "No se pudo conectar con el servidor…" | Revisa tu internet y que Tailscale esté encendido |
+
+> Si olvidaste tu contraseña del SIIA, cámbiala en el portal del SIIA. "¿Olvidaste tu contraseña?" de la app solo sirve para la cuenta de AppTESCHI.
 
 ## 3. El Dashboard
 
 Desde el Dashboard puedes:
 
 - Ver tu nombre y cerrar sesión (ícono de perfil, esquina superior derecha).
-- Acceder a cada módulo escolar tocando su tarjeta:
+- Acceder a cada módulo escolar desde la barra de navegación inferior:
 
 | Módulo | Qué hace |
 |---|---|
@@ -41,7 +64,7 @@ Desde el Dashboard puedes:
 | **Kardex** | Muestra tu historial completo de materias, tu promedio general y qué porcentaje de tu carrera llevas cubierto; puedes exportarlo a PDF |
 | **Intersemestral** | Consulta si hay un periodo intersemestral disponible |
 
-> Estos módulos muestran información de ejemplo mientras no exista una conexión automática con el sistema institucional (SIIA) para cada uno — tu perfil y tu sesión sí son reales.
+> La información de estos módulos es la que registra control escolar en AppTESCHI (tus calificaciones, tu historial y tu horario reales); no se lee del SIIA.
 
 ## 4. Reinscripción
 

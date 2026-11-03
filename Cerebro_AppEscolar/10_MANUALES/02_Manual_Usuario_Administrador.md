@@ -1,5 +1,7 @@
 # Manual de Usuario — Administrador
 
+> ⚠️ **Desactualizado (12/10/2026, DEC-043):** describe el sistema con backend propio, base de datos y panel de administrador. Hoy la app solo tiene las pantallas del alumno con datos del SIIA (ver [[REGLAS_PROYECTO]] y [[MAPA_PROYECTO]]). Actualizar antes de entregarlo.
+
 > Guía de uso del panel de administración de AppTESCHI: control total sobre alumnos, calificaciones, auditoría y estadísticas.
 > **Relacionado con:** [[01_Manual_Usuario_Alumno]], [[01_Casos_de_Uso]]
 
@@ -7,7 +9,7 @@
 
 ## 1. Iniciar sesión como administrador
 
-Captura tu matrícula/usuario de administrador y contraseña. Si tus credenciales son válidas como administrador, entras directamente al **Centro de control**, sin verificación por OTP.
+En el formulario de inicio, captura tu usuario de administrador y contraseña. Recibirás un código de 6 dígitos en tu correo (verificación en dos pasos, DEC-019); al escribirlo entras al **Centro de control**. Tu sesión dura 12 horas.
 
 ## 2. Centro de control (pantalla principal)
 
@@ -23,6 +25,8 @@ Al entrar verás:
 | **Auditoría** | Ver el historial completo de movimientos administrativos |
 | **Estadísticas** | Ver gráficas de matrícula, avance y calificaciones |
 
+Además: **Reinscripciones** (panel del director), **Horarios** (carga por Excel, [[08_Horarios]]) y **Administradores** (solo `SUPERADMIN`). Ver [[06_PanelAdministrador]].
+
 Debajo encontrarás el permiso de ubicación (para enriquecer la auditoría con coordenadas) y un registro de actividad local de este dispositivo (permisos, sesión) — distinto del historial de Auditoría, que es el que refleja movimientos reales sobre la base de datos.
 
 ---
@@ -36,7 +40,9 @@ Debajo encontrarás el permiso de ubicación (para enriquecer la auditoría con 
 3. Opcionalmente, asigna el semestre (1 a 12).
 4. Toca **"Registrar"**.
 
-> El alumno no queda con contraseña — la crea él mismo cuando se registra en la app con su matrícula.
+> El alumno no queda con contraseña: puede crearla él mismo registrándose en la app, **o entrar directamente con su usuario del SIIA** desde el mismo formulario.
+>
+> **Importante:** cualquier alumno con usuario del SIIA puede entrar, pero si no lo diste de alta aquí solo ve su nombre, carrera y correo del SIIA, y sus módulos le dicen que aún no tiene registro (DEC-040). La app nunca lo da de alta sola: hazlo aquí con exactamente la matrícula del SIIA y un correo válido, ahí le llegarán sus códigos (si no le pones correo, la app se lo pide en su primer inicio de sesión). Si el alumno ve "cuenta pendiente", asígnale su carrera aquí; el procedimiento para conectar una carrera con el SIIA está en [[04_Manual_Mantenimiento]] §7.2.
 
 ### 3.2 Buscar un alumno
 

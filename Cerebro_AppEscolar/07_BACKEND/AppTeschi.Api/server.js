@@ -171,12 +171,32 @@ function firmarTokenAdministrador(admin) {
   );
 }
 
-function firmarTokenAlumno(alumno) {
+/** extra.sid: sesión del SIIA guardada en memoria (DEC-042), solo si entró con NIP. */
+function firmarTokenAlumno(alumno, extra = {}) {
   return jwt.sign(
-    { idAlumno: alumno.IdAlumno, matricula: alumno.Matricula },
+    { idAlumno: alumno.IdAlumno, matricula: alumno.Matricula, ...extra },
     process.env.JWT_SECRET,
     { expiresIn: JWT_ALUMNO_EXPIRA_EN, audience: AUD_ALUMNO }
   );
+}
+
+// Alumno válido en el SIIA que no está dado de alta en AppTESCHI (DEC-040):
+// entra sin que se cree nada en la base. Su token lleva lo que dio el SIIA y
+// los endpoints del alumno responden con MENSAJE_SIN_REGISTRO en vez de datos.
+const MENSAJE_SIN_REGISTRO = 'Entraste con tu cuenta del SIIA, pero aún no tienes registro en AppTESCHI: ' +
+  'tu información académica aparecerá cuando control escolar te dé de alta.';
+
+function firmarTokenAlumnoSinRegistro({ matricula, nombre, correo, carrera, sid }) {
+  return jwt.sign(
+    { idAlumno: null, matricula, sinRegistro: true, nombre, correo, carrera, ...(sid ? { sid } : {}) },
+    process.env.JWT_SECRET,
+    { expiresIn: JWT_ALUMNO_EXPIRA_EN, audience: AUD_ALUMNO }
+  );
+}
+
+function alumnoNoEncontrado(req, res) {
+  if (req.alumno?.sinRegistro) return res.status(409).json({ ok: false, error: MENSAJE_SIN_REGISTRO });
+  return res.status(404).json({ ok: false, error: 'No existe un alumno con esa matrícula' });
 }
 
 /** tipo: 'ALUMNO' | 'ADMINISTRADOR' | 'DOCENTE'; identificador: matrícula o usuario ya validados. */
@@ -401,7 +421,7 @@ app.get('/api/reinscripcion/estatus/:matricula', requireAlumno(), async (req, re
         WHERE a.Matricula = @Matricula
       `);
     const alumno = alumnoLookup.recordset[0];
-    if (!alumno) return res.status(404).json({ ok: false, error: 'No existe un alumno con esa matrícula' });
+    if (!alumno) return alumnoNoEncontrado(req, res);
     if (!alumno.ClaveCarrera || !alumno.Semestre) {
       return res.status(409).json({ ok: false, error: 'El alumno no tiene carrera o semestre asignado todavía' });
     }
@@ -493,7 +513,7 @@ app.post('/api/reinscripcion/solicitud', requireAlumno(), async (req, res) => {
       .input('Matricula', sql.NVarChar(20), matricula)
       .query(`SELECT IdAlumno FROM dbo.Alumnos WHERE Matricula = @Matricula`);
     const alumno = alumnoLookup.recordset[0];
-    if (!alumno) return res.status(404).json({ ok: false, error: 'No existe un alumno con esa matrícula' });
+    if (!alumno) return alumnoNoEncontrado(req, res);
 
     const bloqueo = await db.request()
       .input('IdAlumno', sql.Int, alumno.IdAlumno)
@@ -764,7 +784,8 @@ app.post('/api/auth/cuenta', async (req, res) => {
     }
     const result = await (await getPool()).request()
       .input('Matricula', sql.NVarChar(20), matricula)
-      .query(`SELECT TOP 1 a.Matricula, a.NombreCompleto, ac.ContrasenaHash, ac.ContrasenaSalt
+      .query(`SELECT TOP 1 a.Matricula, a.NombreCompleto, a.CorreoOtp, a.CorreoInstitucional,
+                     ac.ContrasenaHash, ac.ContrasenaSalt
               FROM dbo.Alumnos a
               JOIN dbo.AlumnoCredenciales ac ON ac.IdAlumno = a.IdAlumno
               WHERE a.Matricula = @Matricula AND ac.Estado = N'REGISTRADO'`);
@@ -774,9 +795,14 @@ app.post('/api/auth/cuenta', async (req, res) => {
       return res.status(401).json({ ok: false, error: 'Matrícula o contraseña incorrectas' });
     }
     console.log(`[AUTH][OK] matricula=${matricula}`);
+    // Si ya hay un correo guardado, /api/otp/enviar lo usa (el del cliente se
+    // ignora): se devuelve enmascarado para que la app envíe el código sola
+    // al entrar al paso de verificación, sin pedir que lo escriba.
+    const correoGuardado = String(account.CorreoOtp || account.CorreoInstitucional || '').trim();
     res.json({
       ok: true, matricula: account.Matricula, nombre: account.NombreCompleto, esAdministrador: false,
-      ticket: firmarTicketLogin('ALUMNO', account.Matricula)
+      ticket: firmarTicketLogin('ALUMNO', account.Matricula),
+      correoEnmascarado: correoGuardado ? enmascararCorreo(correoGuardado) : ''
     });
   } catch (err) {
     console.error('[AUTH][ERROR]', err.message);
@@ -821,29 +847,27 @@ app.post('/api/auth/administrador', async (req, res) => {
 // ─── Autenticación SIIA real (Fase 2, ver DEC-031) ─────────────────────────
 // Valida usuario y contraseña directamente contra el SIIA de la escuela
 // (https://siia.teschi.edu.mx/Teschi/api/login.ashx) en vez de una copia
-// local de credenciales. Si el SIIA acepta al usuario, se sincroniza (o se
-// crea) su registro en dbo.Alumnos y se emite un ticket de 10 min para
-// completar el OTP de AppTESCHI.
+// local de credenciales. Si ya existe en dbo.Alumnos se vincula; si no, entra
+// sin registro (DEC-040) — aquí nunca se crea un alumno.
 //
-// Respuestas posibles:
-//   ok:true + ticket + correoEnmascarado → alumno con correo registrado (flujo normal OTP)
-//   ok:true + cuentaPendiente:true       → alumno sin carrera mapeada aún (hay que
-//                                          asignarle IdCarrera manualmente en Admin)
-//   ok:true + requiereCorreo:true        → alumno sin correo OTP registrado
+// Desde la API 1.1 del SIIA (DEC-041) el login pide además un NIP de 4
+// dígitos: /api/auth/siia valida la contraseña y responde requiereNip +
+// ticketNip; /api/auth/siia/nip verifica (o crea) el NIP con el SIIA y entrega
+// directo la sesión de AppTESCHI — para estos usuarios el NIP sustituye al
+// código por correo. Si el SIIA no pidiera NIP, sigue el flujo de antes:
+//   ok:true + ticket + correoEnmascarado → sigue el OTP por correo
+//   ok:true + cuentaPendiente:true       → alumno registrado sin carrera mapeada
 //   ok:false                             → credenciales inválidas / error / tipo no soportado
 const SIIA_LOGIN_URL = process.env.SIIA_LOGIN_URL || 'https://siia.teschi.edu.mx/Teschi/api/login.ashx';
+const SIIA_NIP_URL = process.env.SIIA_NIP_URL || new URL('nip.ashx', SIIA_LOGIN_URL).toString();
+const SIIA_CALIFICACIONES_URL = process.env.SIIA_CALIFICACIONES_URL ||
+  new URL('calificaciones/parciales.ashx', SIIA_LOGIN_URL).toString();
 
-// El SIIA no documenta los valores exactos de "tipo" — se normalizan por
-// coincidencia de texto y se deja el valor crudo si no se reconoce, para
-// poder ajustarlo con el log sin tener que adivinar de antemano.
-// El SIIA no documenta los valores de "tipo": en la práctica manda códigos
-// de una letra (confirmado con logs reales: "E" = alumno/escolar). "D" y "A"
-// son la suposición más común (docente / administrativo) mientras se
-// confirman con más logins; cualquier otro valor queda sin mapear y se
-// registra tal cual para poder añadirlo después.
+// Valores de "tipo" según el Swagger de la API 1.1: E = alumno (también
+// confirmado con logins reales), P = docente, A = administrativo.
 const TIPOS_SIIA_CONOCIDOS = {
   E: 'ALUMNO',
-  D: 'DOCENTE',
+  P: 'DOCENTE',
   A: 'ADMINISTRADOR'
 };
 
@@ -857,25 +881,83 @@ function mapTipoSiia(tipoRaw) {
   return t;
 }
 
-function loginSiiaReal(usuario, password) {
+// Datos del SIIA y código OTP de los alumnos sin registro (DEC-040). No pueden
+// ir a OtpHistorial (exige IdAlumno) y no se quiere guardar nada suyo en la
+// base, así que viven solo en memoria: mismas reglas de 10 min y 5 intentos;
+// si la API se reinicia, el alumno vuelve a iniciar sesión.
+const TICKET_VALIDEZ_MS = 10 * 60 * 1000;
+const sesionesSinRegistro = new Map();
+
+function sesionSinRegistro(matricula) {
+  const ahora = Date.now();
+  for (const [clave, s] of sesionesSinRegistro) {
+    if (s.expira < ahora) sesionesSinRegistro.delete(clave);
+  }
+  return sesionesSinRegistro.get(String(matricula).trim());
+}
+
+// Logins que ya pasaron la contraseña y esperan el NIP (DEC-041). Guardan el
+// tempToken del SIIA (10 min) en memoria; a la app solo le llega ticketNip,
+// un identificador aleatorio.
+const NIP_MAX_INTENTOS = 5;
+const loginsNipPendientes = new Map();
+
+function loginNipPendiente(ticketNip) {
+  const ahora = Date.now();
+  for (const [clave, p] of loginsNipPendientes) {
+    if (p.expira < ahora) loginsNipPendientes.delete(clave);
+  }
+  return ticketNip ? loginsNipPendientes.get(String(ticketNip)) : undefined;
+}
+
+// Token final del SIIA de quien entró con NIP (DEC-042): solo en memoria del
+// backend, nunca en la base ni en el teléfono. El token de sesión de AppTESCHI
+// lleva `sid`, un identificador aleatorio para encontrarlo. Dura lo que el SIIA
+// diga (480 min); si la API se reinicia se pierde y el alumno vuelve a entrar.
+const sesionesSiia = new Map();
+
+function guardarSesionSiia(matricula, token, expiraEnMinutos) {
+  const sid = crypto.randomBytes(18).toString('base64url');
+  const minutos = Number(expiraEnMinutos) > 0 ? Number(expiraEnMinutos) : 480;
+  sesionesSiia.set(sid, { matricula: String(matricula), token, expira: Date.now() + minutos * 60 * 1000 });
+  return sid;
+}
+
+function sesionSiia(sid) {
+  const ahora = Date.now();
+  for (const [clave, s] of sesionesSiia) {
+    if (s.expira < ahora) sesionesSiia.delete(clave);
+  }
+  return sid ? sesionesSiia.get(String(sid)) : undefined;
+}
+
+function postSiia(url, cuerpo) {
+  return llamarSiia({ metodo: 'POST', url, cuerpo });
+}
+
+function llamarSiia({ metodo, url, cuerpo = null, token = null }) {
   return new Promise((resolve, reject) => {
     let target;
     try {
-      target = new URL(SIIA_LOGIN_URL);
+      target = new URL(url);
     } catch {
-      reject(new Error('SIIA_LOGIN_URL inválida'));
+      reject(new Error('URL del SIIA inválida'));
       return;
     }
-    const payload = Buffer.from(JSON.stringify({ usuario, password }), 'utf8');
+    const payload = cuerpo ? Buffer.from(JSON.stringify(cuerpo), 'utf8') : null;
+    // Node no manda User-Agent por su cuenta; Postman y los navegadores sí (BUG-024).
+    const headers = { Accept: 'application/json', 'User-Agent': 'AppTESCHI-API/1.1' };
+    if (payload) {
+      headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = payload.length;
+    }
+    if (token) headers.Authorization = `Bearer ${token}`;
     const peticion = https.request({
       hostname: target.hostname,
       port: target.port || 443,
       path: target.pathname + target.search,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': payload.length
-      },
+      method: metodo,
+      headers,
       timeout: 10000
     }, (resp) => {
       let raw = '';
@@ -888,9 +970,105 @@ function loginSiiaReal(usuario, password) {
     });
     peticion.on('timeout', () => peticion.destroy(new Error('Tiempo de espera agotado al contactar al SIIA')));
     peticion.on('error', reject);
-    peticion.write(payload);
+    if (payload) peticion.write(payload);
     peticion.end();
   });
+}
+
+/**
+ * Clasifica al usuario que el SIIA ya validó y lo enlaza con AppTeschiDB.
+ * Nunca crea alumnos (DEC-036, DEC-040). Devuelve uno de:
+ *   { error: { status, mensaje } }
+ *   { sinRegistro: true, matricula, nombre, correo, carrera, cambioPw }
+ *   { cuentaPendiente: true, nombre }
+ *   { alumno, matricula, nombre, correoSiia, cambioPw }
+ */
+async function resolverUsuarioSiia(usuario, infoUsuario) {
+  const matricula = String(infoUsuario.numUsuario || infoUsuario.usuario || usuario).trim();
+  const nombreCompleto = String(
+    infoUsuario.nombreCompleto ||
+    [infoUsuario.nombre, infoUsuario.paterno, infoUsuario.materno].filter(Boolean).join(' ')
+  ).trim();
+  const correoSiia = String(infoUsuario.correo || '').trim().toLowerCase();
+  const cambioPw = !!infoUsuario.cambioPw;
+  const tipo = mapTipoSiia(infoUsuario.tipo);
+
+  console.log(`[AUTH-SIIA][SIIA-OK] usuario=${usuario} matricula=${matricula} tipoSiia="${infoUsuario.tipo}" tipoMapeado=${tipo} idCarreraSiia=${infoUsuario.idCarrera} area="${infoUsuario.area}"`);
+
+  if (tipo === 'DOCENTE') {
+    // Fase 3: los docentes no existen aún en AppTESCHI.
+    return { error: { status: 501, mensaje: 'Soporte para docentes disponible próximamente (Fase 3)' } };
+  }
+  if (tipo !== 'ALUMNO') {
+    console.warn(`[AUTH-SIIA][TIPO-NO-SOPORTADO] usuario=${usuario} tipoSiia="${infoUsuario.tipo}"`);
+    return { error: { status: 403, mensaje: 'Este tipo de cuenta del SIIA no está soportado todavía en la app.' } };
+  }
+
+  const db = await getPool();
+  const alumnoResult = await db.request()
+    .input('Matricula', sql.NVarChar(20), matricula)
+    .query(`SELECT IdAlumno, Matricula, NombreCompleto, CorreoOtp, CorreoInstitucional, IdCarrera, UsuarioSiia
+            FROM dbo.Alumnos WHERE Matricula = @Matricula`);
+  const alumno = alumnoResult.recordset[0];
+
+  if (!alumno) {
+    // Entra con lo que da el SIIA y NO se crea nada en dbo.Alumnos; el
+    // administrador lo da de alta cuando corresponda.
+    let carrera = String(infoUsuario.area || '').trim() || null;
+    if (infoUsuario.idCarrera) {
+      const mapeo = await db.request()
+        .input('IdCarreraSiia', sql.Int, infoUsuario.idCarrera)
+        .query(`SELECT Nombre FROM dbo.CatalogoCarreras WHERE IdCarreraSiia = @IdCarreraSiia`);
+      carrera = mapeo.recordset[0]?.Nombre || carrera;
+    }
+    console.log(`[AUTH-SIIA][SIN-REGISTRO] usuario=${usuario} matricula=${matricula}`);
+    return { sinRegistro: true, matricula, nombre: nombreCompleto || matricula, correo: correoSiia, carrera, cambioPw };
+  }
+
+  if (!alumno.UsuarioSiia) {
+    // Ya existía (dado de alta a mano) pero nunca se había vinculado con su
+    // usuario del SIIA — se enlaza ahora que validó su contraseña real.
+    await db.request()
+      .input('IdAlumno', sql.Int, alumno.IdAlumno)
+      .input('UsuarioSiia', sql.NVarChar(50), usuario)
+      .query(`UPDATE dbo.Alumnos SET UsuarioSiia = @UsuarioSiia WHERE IdAlumno = @IdAlumno`);
+  }
+
+  let idCarreraAlumno = alumno.IdCarrera;
+  if (!idCarreraAlumno && infoUsuario.idCarrera) {
+    // Si su carrera ya está mapeada en CatalogoCarreras.IdCarreraSiia se
+    // enlaza sola en vez de dejarlo en "cuenta pendiente" (DEC-037).
+    const carreraMapeada = await db.request()
+      .input('IdCarreraSiia', sql.Int, infoUsuario.idCarrera)
+      .query(`SELECT IdCarrera, Clave FROM dbo.CatalogoCarreras WHERE IdCarreraSiia = @IdCarreraSiia`);
+    const carrera = carreraMapeada.recordset[0];
+    if (carrera) {
+      await db.request()
+        .input('IdAlumno', sql.Int, alumno.IdAlumno)
+        .input('IdCarrera', sql.Int, carrera.IdCarrera)
+        .query(`UPDATE dbo.Alumnos SET IdCarrera = @IdCarrera WHERE IdAlumno = @IdAlumno`);
+      idCarreraAlumno = carrera.IdCarrera;
+      console.log(`[AUTH-SIIA][CARRERA-ENLAZADA] usuario=${usuario} matricula=${matricula} idCarreraSiia=${infoUsuario.idCarrera} -> ${carrera.Clave}`);
+    }
+  }
+
+  if (!idCarreraAlumno) {
+    // Se deja en el log el idCarrera/área del SIIA para completar el mapeo
+    // (25_MapeoCarrerasSiia.sql) sin pedirle al alumno que vuelva a intentar.
+    console.log(
+      `[AUTH-SIIA][PENDIENTE] usuario=${usuario} matricula=${matricula} sin carrera mapeada ` +
+      `idCarreraSiia=${infoUsuario.idCarrera} area="${infoUsuario.area}" tipoCarreraSiia="${infoUsuario.tipoCarrera}"`
+    );
+    return { cuentaPendiente: true, nombre: alumno.NombreCompleto || nombreCompleto };
+  }
+
+  return { alumno, matricula: alumno.Matricula, nombre: alumno.NombreCompleto || nombreCompleto, correoSiia, cambioPw };
+}
+
+/** Respuesta de error del SIIA con el mismo código, o 502 si no es un 4xx conocido. */
+function responderErrorSiia(res, statusCode, data, porDefecto) {
+  const status = [400, 401, 404, 409, 422, 429].includes(statusCode) ? statusCode : 502;
+  return res.status(status).json({ ok: false, error: data?.mensaje || porDefecto });
 }
 
 app.post('/api/auth/siia', async (req, res) => {
@@ -906,7 +1084,7 @@ app.post('/api/auth/siia', async (req, res) => {
 
     let siia;
     try {
-      siia = await loginSiiaReal(usuario, password);
+      siia = await postSiia(SIIA_LOGIN_URL, { usuario, password });
     } catch (err) {
       console.error('[AUTH-SIIA][RED]', err.message);
       return res.status(502).json({ ok: false, error: 'No se pudo contactar al SIIA. Intenta más tarde.' });
@@ -923,114 +1101,359 @@ app.post('/api/auth/siia', async (req, res) => {
       return res.status(429).json({ ok: false, error: data?.mensaje || 'Demasiados intentos en el SIIA. Espera un momento.' });
     }
     if (statusCode !== 200 || !data?.ok) {
-      console.error(`[AUTH-SIIA][ERROR-SIIA] usuario=${usuario} status=${statusCode} body=${JSON.stringify(data)}`);
+      console.error(`[AUTH-SIIA][ERROR-SIIA] usuario=${usuario} status=${statusCode} mensaje="${data?.mensaje || ''}"`);
       return res.status(502).json({ ok: false, error: data?.mensaje || 'El SIIA no respondió correctamente. Intenta más tarde.' });
     }
 
-    const infoUsuario = data.usuario || {};
-    const matricula = String(infoUsuario.numUsuario || infoUsuario.usuario || usuario).trim();
-    const nombreCompleto = String(
-      infoUsuario.nombreCompleto ||
-      [infoUsuario.nombre, infoUsuario.paterno, infoUsuario.materno].filter(Boolean).join(' ')
-    ).trim();
-    const correoSiia = String(infoUsuario.correo || '').trim().toLowerCase();
-    const tipo = mapTipoSiia(infoUsuario.tipo);
-
-    console.log(`[AUTH-SIIA][SIIA-OK] usuario=${usuario} matricula=${matricula} tipoSiia="${infoUsuario.tipo}" tipoMapeado=${tipo} idCarreraSiia=${infoUsuario.idCarrera} carreraSiia="${infoUsuario.carrera}"`);
-
-    if (tipo === 'DOCENTE') {
-      // Fase 3: los docentes no existen aún en AppTESCHI — el ticket DOCENTE
-      // llegará cuando se implemente la tabla Docentes.
-      return res.status(501).json({ ok: false, error: 'Soporte para docentes disponible próximamente (Fase 3)' });
-    }
-    if (tipo !== 'ALUMNO') {
-      console.warn(`[AUTH-SIIA][TIPO-NO-SOPORTADO] usuario=${usuario} tipoSiia="${infoUsuario.tipo}"`);
-      return res.status(403).json({ ok: false, error: 'Este tipo de cuenta del SIIA no está soportado todavía en la app.' });
-    }
-
-    const db = await getPool();
-
-    const alumnoResult = await db.request()
-      .input('Matricula', sql.NVarChar(20), matricula)
-      .query(`SELECT IdAlumno, Matricula, NombreCompleto, CorreoOtp, CorreoInstitucional, IdCarrera, UsuarioSiia
-              FROM dbo.Alumnos WHERE Matricula = @Matricula`);
-    const alumno = alumnoResult.recordset[0];
-
-    if (!alumno) {
-      // El SIIA validó al usuario, pero AppTESCHI no da de alta cuentas
-      // automáticamente: el alumno debe existir ya en dbo.Alumnos (import
-      // o registro manual). Así solo entra a la app quien la escuela ya
-      // tiene cargada, y nunca se crean cuentas con datos a medias.
-      console.warn(`[AUTH-SIIA][NO-REGISTRADO] usuario=${usuario} matricula=${matricula}`);
-      return res.status(404).json({
-        ok: false,
-        error: 'Tu matrícula todavía no está registrada en AppTESCHI. Contacta al administrador para que la den de alta.'
+    // API 1.1: contraseña correcta, falta el NIP (DEC-041).
+    if (data.requiereNip || (!data.token && data.tempToken)) {
+      if (!data.tempToken) {
+        console.error(`[AUTH-SIIA][SIN-TEMPTOKEN] usuario=${usuario}`);
+        return res.status(502).json({ ok: false, error: 'El SIIA no respondió correctamente. Intenta más tarde.' });
+      }
+      const ticketNip = crypto.randomBytes(24).toString('base64url');
+      loginNipPendiente(null);
+      loginsNipPendientes.set(ticketNip, {
+        usuario,
+        tempToken: data.tempToken,
+        tieneNip: !!data.tieneNip,
+        usuarioSiia: data.usuario || null,
+        intentos: 0,
+        expira: Date.now() + TICKET_VALIDEZ_MS
+      });
+      console.log(`[AUTH-SIIA][REQUIERE-NIP] usuario=${usuario} tieneNip=${!!data.tieneNip} usuarioEnPaso1=${!!data.usuario}`);
+      return res.json({
+        ok: true,
+        requiereNip: true,
+        tieneNip: !!data.tieneNip,
+        ticketNip,
+        nombre: String(data.usuario?.nombreCompleto || '').trim()
       });
     }
 
-    if (!alumno.UsuarioSiia) {
-      // Ya existía (por ejemplo, dado de alta a mano) pero nunca se había
-      // vinculado con su usuario del SIIA — se enlaza ahora que validó su
-      // contraseña real. Esto solo actualiza el enlace, no crea el alumno.
-      await db.request()
-        .input('IdAlumno', sql.Int, alumno.IdAlumno)
-        .input('UsuarioSiia', sql.NVarChar(50), usuario)
-        .query(`UPDATE dbo.Alumnos SET UsuarioSiia = @UsuarioSiia WHERE IdAlumno = @IdAlumno`);
+    // El SIIA entregó el token final sin NIP: flujo de antes, con OTP por correo.
+    const r = await resolverUsuarioSiia(usuario, data.usuario || {});
+    if (r.error) return res.status(r.error.status).json({ ok: false, error: r.error.mensaje });
+    if (r.cuentaPendiente) return res.json({ ok: true, cuentaPendiente: true, nombre: r.nombre });
+
+    if (r.sinRegistro) {
+      const previa = sesionSinRegistro(r.matricula);
+      sesionesSinRegistro.set(r.matricula, {
+        nombre: r.nombre,
+        correo: r.correo,
+        carrera: r.carrera,
+        // Un código ya enviado sigue valiendo al volver a iniciar sesión ("Ya tengo un código").
+        otp: previa?.otp,
+        expira: Math.max(Date.now() + TICKET_VALIDEZ_MS, previa?.otp?.expira || 0)
+      });
+      return res.json({
+        ok: true,
+        tipo: 'ALUMNO',
+        identificador: r.matricula,
+        nombre: r.nombre,
+        ticket: firmarTicketLogin('ALUMNO', r.matricula),
+        correoEnmascarado: r.correo ? enmascararCorreo(r.correo) : '',
+        cambioPw: r.cambioPw,
+        sinRegistro: true
+      });
     }
 
-    let idCarreraAlumno = alumno.IdCarrera;
-
-    if (!idCarreraAlumno && infoUsuario.idCarrera) {
-      // El SIIA sí trae la carrera del alumno — si ya está mapeada en
-      // CatalogoCarreras.IdCarreraSiia (ver migración 24), se enlaza sola
-      // en vez de dejarlo en "cuenta pendiente" para siempre.
-      const carreraMapeada = await db.request()
-        .input('IdCarreraSiia', sql.Int, infoUsuario.idCarrera)
-        .query(`SELECT IdCarrera, Clave FROM dbo.CatalogoCarreras WHERE IdCarreraSiia = @IdCarreraSiia`);
-      const carrera = carreraMapeada.recordset[0];
-      if (carrera) {
-        await db.request()
-          .input('IdAlumno', sql.Int, alumno.IdAlumno)
-          .input('IdCarrera', sql.Int, carrera.IdCarrera)
-          .query(`UPDATE dbo.Alumnos SET IdCarrera = @IdCarrera WHERE IdAlumno = @IdAlumno`);
-        idCarreraAlumno = carrera.IdCarrera;
-        console.log(`[AUTH-SIIA][CARRERA-ENLAZADA] usuario=${usuario} matricula=${matricula} idCarreraSiia=${infoUsuario.idCarrera} -> ${carrera.Clave}`);
-      }
-    }
-
-    if (!idCarreraAlumno) {
-      // Se deja registrado el idCarrera/nombre que trae el SIIA para que
-      // sea trivial completar el mapeo (ver 24_MapeoCarrerasSiia.sql) sin
-      // tener que pedirle a este alumno que vuelva a intentar.
-      console.log(
-        `[AUTH-SIIA][PENDIENTE] usuario=${usuario} matricula=${matricula} sin carrera mapeada ` +
-        `idCarreraSiia=${infoUsuario.idCarrera} carreraSiia="${infoUsuario.carrera}" tipoCarreraSiia="${infoUsuario.tipoCarrera}"`
-      );
-      return res.json({ ok: true, cuentaPendiente: true, nombre: alumno.NombreCompleto || nombreCompleto });
-    }
-
-    const correoOtp = String(alumno.CorreoOtp || alumno.CorreoInstitucional || correoSiia || '').trim();
+    // Sin correo guardado se responde igual, con ticket y correoEnmascarado
+    // vacío: la app pide escribirlo en la verificación y /api/otp/verificar lo
+    // guarda cuando el código llega bien.
+    const correoOtp = String(r.alumno.CorreoOtp || r.alumno.CorreoInstitucional || r.correoSiia || '').trim();
     if (!correoOtp) {
-      console.log(`[AUTH-SIIA][SIN-CORREO] usuario=${usuario} matricula=${matricula}`);
-      return res.json({ ok: true, requiereCorreo: true, tipo: 'ALUMNO', identificador: alumno.Matricula });
+      console.log(`[AUTH-SIIA][SIN-CORREO] usuario=${usuario} matricula=${r.matricula}`);
     }
-
-    // Flujo normal — emitir ticket para OTP
-    const ticket = firmarTicketLogin('ALUMNO', alumno.Matricula);
-    const correoEnmascarado = enmascararCorreo(correoOtp);
-    console.log(`[AUTH-SIIA][OK] usuario=${usuario} matricula=${alumno.Matricula}`);
+    console.log(`[AUTH-SIIA][OK] usuario=${usuario} matricula=${r.matricula}`);
     res.json({
       ok: true,
       tipo: 'ALUMNO',
-      identificador: alumno.Matricula,
-      nombre: alumno.NombreCompleto || nombreCompleto,
-      ticket,
-      correoEnmascarado,
-      cambioPw: !!infoUsuario.cambioPw
+      identificador: r.matricula,
+      nombre: r.nombre,
+      ticket: firmarTicketLogin('ALUMNO', r.matricula),
+      correoEnmascarado: correoOtp ? enmascararCorreo(correoOtp) : '',
+      cambioPw: r.cambioPw
     });
   } catch (err) {
     console.error('[AUTH-SIIA][ERROR]', err.message);
     res.status(500).json({ ok: false, error: 'No se pudo validar con el SIIA' });
+  }
+});
+
+// Paso 2 del login SIIA (DEC-041): { ticketNip, nip } verifica el NIP;
+// { ticketNip, nuevoNip, confirmarNip } lo crea por primera vez. Si el SIIA lo
+// acepta, se entrega directo el token de sesión de AppTESCHI (sin OTP por correo).
+app.post('/api/auth/siia/nip', async (req, res) => {
+  try {
+    const ticketNip = String(req.body?.ticketNip || '');
+    const nip = String(req.body?.nip || '').trim();
+    const nuevoNip = String(req.body?.nuevoNip || '').trim();
+    const confirmarNip = String(req.body?.confirmarNip || '').trim();
+    const configurar = nuevoNip !== '';
+
+    const pendiente = loginNipPendiente(ticketNip);
+    if (!pendiente) {
+      return res.status(401).json({ ok: false, error: 'Tu inicio de sesión expiró. Vuelve a ingresar tu usuario y contraseña.' });
+    }
+    if (excedeLimite(`${clientIp(req)}:auth-siia-nip:${pendiente.usuario}`, 10, 5 * 60 * 1000)) {
+      return res.status(429).json({ ok: false, error: 'Demasiados intentos. Espera unos minutos.' });
+    }
+    if (configurar) {
+      if (!/^\d{4}$/.test(nuevoNip)) return res.status(400).json({ ok: false, error: 'El NIP debe tener 4 dígitos' });
+      if (nuevoNip !== confirmarNip) return res.status(400).json({ ok: false, error: 'Los NIP no coinciden' });
+    } else if (!/^\d{4}$/.test(nip)) {
+      return res.status(400).json({ ok: false, error: 'El NIP debe tener 4 dígitos' });
+    }
+    if (pendiente.intentos >= NIP_MAX_INTENTOS) {
+      loginsNipPendientes.delete(ticketNip);
+      return res.status(429).json({ ok: false, error: 'Demasiados intentos con el NIP. Vuelve a iniciar sesión.' });
+    }
+
+    const cuerpo = configurar
+      ? { accion: 'configurar', tempToken: pendiente.tempToken, nuevoNip, confirmarNip }
+      : { accion: 'verificar', tempToken: pendiente.tempToken, nip };
+    let siia;
+    try {
+      siia = await postSiia(SIIA_NIP_URL, cuerpo);
+    } catch (err) {
+      console.error('[AUTH-SIIA][NIP][RED]', err.message);
+      return res.status(502).json({ ok: false, error: 'No se pudo contactar al SIIA. Intenta más tarde.' });
+    }
+    const { statusCode, data } = siia;
+
+    if (statusCode !== 200 || !data?.ok || !data?.token) {
+      pendiente.intentos += 1;
+      console.warn(`[AUTH-SIIA][NIP-RECHAZO] usuario=${pendiente.usuario} accion=${cuerpo.accion} status=${statusCode} mensaje="${data?.mensaje || ''}"`);
+      return responderErrorSiia(res, statusCode === 200 ? 502 : statusCode, data,
+        configurar ? 'No se pudo crear tu NIP. Intenta de nuevo.' : 'NIP incorrecto');
+    }
+
+    loginsNipPendientes.delete(ticketNip);
+    const infoUsuario = data.usuarioInfo || pendiente.usuarioSiia;
+    if (!infoUsuario) {
+      console.error(`[AUTH-SIIA][NIP-SIN-DATOS] usuario=${pendiente.usuario}`);
+      return res.status(502).json({ ok: false, error: 'El SIIA no devolvió los datos de tu cuenta. Intenta más tarde.' });
+    }
+    console.log(`[AUTH-SIIA][NIP-OK] usuario=${pendiente.usuario} accion=${cuerpo.accion}`);
+
+    const r = await resolverUsuarioSiia(pendiente.usuario, infoUsuario);
+    if (r.error) return res.status(r.error.status).json({ ok: false, error: r.error.mensaje });
+    if (r.cuentaPendiente) return res.json({ ok: true, cuentaPendiente: true, nombre: r.nombre });
+
+    // El token final del SIIA se queda en memoria para consultar sus
+    // calificaciones parciales (DEC-042); al teléfono solo le llega el sid.
+    const sid = guardarSesionSiia(r.matricula, data.token, data.expiraEnMinutos);
+
+    if (r.sinRegistro) {
+      const token = firmarTokenAlumnoSinRegistro({
+        matricula: r.matricula, nombre: r.nombre, correo: r.correo, carrera: r.carrera, sid
+      });
+      return res.json({ ok: true, token, tipo: 'ALUMNO', identificador: r.matricula, nombre: r.nombre, cambioPw: r.cambioPw, sinRegistro: true });
+    }
+
+    const db = await getPool();
+    await db.request().input('Id', sql.Int, r.alumno.IdAlumno)
+      .query(`UPDATE dbo.Alumnos SET UltimoAcceso = SYSUTCDATETIME() WHERE IdAlumno = @Id`);
+    console.log(`[AUTH-SIIA][OK] usuario=${pendiente.usuario} matricula=${r.matricula} nip`);
+    res.json({
+      ok: true,
+      token: firmarTokenAlumno(r.alumno, { sid }),
+      tipo: 'ALUMNO',
+      identificador: r.matricula,
+      nombre: r.nombre,
+      cambioPw: r.cambioPw
+    });
+  } catch (err) {
+    console.error('[AUTH-SIIA][NIP][ERROR]', err.message);
+    res.status(500).json({ ok: false, error: 'No se pudo validar el NIP con el SIIA' });
+  }
+});
+
+// "¿Olvidaste tu NIP?": el SIIA manda el NIP al correo institucional de la
+// CURP. Exige el ticketNip del paso 1 (la contraseña ya se validó).
+app.post('/api/auth/siia/nip/recuperar', async (req, res) => {
+  try {
+    const ticketNip = String(req.body?.ticketNip || '');
+    const curp = String(req.body?.curp || '').trim().toUpperCase();
+    const pendiente = loginNipPendiente(ticketNip);
+    if (!pendiente) {
+      return res.status(401).json({ ok: false, error: 'Tu inicio de sesión expiró. Vuelve a ingresar tu usuario y contraseña.' });
+    }
+    if (excedeLimite(`${clientIp(req)}:auth-siia-nip-recuperar:${pendiente.usuario}`, 3, 10 * 60 * 1000)) {
+      return res.status(429).json({ ok: false, error: 'Demasiadas solicitudes. Espera unos minutos.' });
+    }
+    if (!/^[A-Z0-9]{18}$/.test(curp)) {
+      return res.status(400).json({ ok: false, error: 'La CURP debe tener 18 letras y números' });
+    }
+
+    let siia;
+    try {
+      siia = await postSiia(SIIA_NIP_URL, { accion: 'recuperar', curp });
+    } catch (err) {
+      console.error('[AUTH-SIIA][NIP-RECUPERAR][RED]', err.message);
+      return res.status(502).json({ ok: false, error: 'No se pudo contactar al SIIA. Intenta más tarde.' });
+    }
+    const { statusCode, data } = siia;
+    if (statusCode !== 200 || !data?.ok) {
+      console.warn(`[AUTH-SIIA][NIP-RECUPERAR] usuario=${pendiente.usuario} status=${statusCode} mensaje="${data?.mensaje || ''}"`);
+      return responderErrorSiia(res, statusCode === 200 ? 502 : statusCode, data, 'No se pudo recuperar tu NIP.');
+    }
+    // El correo enmascarado solo se muestra si la CURP es de quien inició sesión.
+    const esSuya = !data.usuario || String(data.usuario).trim().toLowerCase() === pendiente.usuario.toLowerCase();
+    console.log(`[AUTH-SIIA][NIP-RECUPERAR][OK] usuario=${pendiente.usuario} curpPropia=${esSuya}`);
+    res.json({
+      ok: true,
+      correo: esSuya ? String(data.correo || '') : '',
+      mensaje: esSuya && data.correo
+        ? `Te enviamos tu NIP a ${data.correo}`
+        : 'Si la CURP es correcta, el SIIA envió tu NIP a tu correo institucional.'
+    });
+  } catch (err) {
+    console.error('[AUTH-SIIA][NIP-RECUPERAR][ERROR]', err.message);
+    res.status(500).json({ ok: false, error: 'No se pudo recuperar tu NIP' });
+  }
+});
+
+// Calificaciones parciales del alumno en sesión, tomadas del SIIA real con su
+// propio token (DEC-042). Solo para quien entró con NIP: sin `sid` responde
+// 409 SIN_SIIA y la app muestra las calificaciones de AppTeschiDB.
+function materiaParcial(m) {
+  return {
+    materia: String(m.materia || ''),
+    profesor: String(m.profesor || ''),
+    grupo: String(m.grupo || ''),
+    cal1: m.cal1 ?? null, cal1Str: String(m.cal1Str || ''),
+    cal2: m.cal2 ?? null, cal2Str: String(m.cal2Str || ''),
+    cal3: m.cal3 ?? null, cal3Str: String(m.cal3Str || ''),
+    promedioParcial: m.promedioParcial ?? null, promedioParcialStr: String(m.promedioParcialStr || ''),
+    estatus: String(m.estatus || '')
+  };
+}
+
+// Periodo actual y los dos anteriores, con el formato del SIIA ("2026-1").
+// Supuesto (BUG-024): "-1" = febrero–julio y "-2" = agosto–enero.
+function periodosRecientes(fecha = new Date()) {
+  const mes = fecha.getMonth() + 1;
+  let [anio, n] = mes >= 8 ? [fecha.getFullYear(), 2]
+    : mes === 1 ? [fecha.getFullYear() - 1, 2]
+    : [fecha.getFullYear(), 1];
+  const lista = [];
+  for (let i = 0; i < 3; i++) {
+    lista.push(`${anio}-${n}`);
+    [anio, n] = n === 2 ? [anio, 1] : [anio - 1, 2];
+  }
+  return lista;
+}
+
+// Error genérico del SIIA ("No fue posible procesar la solicitud."): ni sesión
+// vencida (401), ni bloqueo por trámites (403), ni alumno inexistente (404).
+function esErrorGenericoSiia({ statusCode, data }) {
+  return statusCode >= 500 || statusCode === 400 || (statusCode === 200 && (!data || data.ok === false));
+}
+
+app.get('/api/mi-calificaciones-siia', requireAlumno(), async (req, res) => {
+  try {
+    if (!req.alumno.sid) {
+      return res.status(409).json({
+        ok: false, codigo: 'SIN_SIIA',
+        error: 'Las calificaciones parciales vienen del SIIA: inicia sesión con tu usuario del SIIA para verlas.'
+      });
+    }
+    const sesion = sesionSiia(req.alumno.sid);
+    if (!sesion || sesion.matricula.toLowerCase() !== String(req.alumno.matricula).toLowerCase()) {
+      res.set('X-Sesion-Invalida', '1');
+      return res.status(401).json({ ok: false, error: 'Tu sesión del SIIA terminó. Inicia sesión de nuevo para ver tus calificaciones.' });
+    }
+    const periodo = String(req.query.periodo || '').trim();
+    if (periodo && !/^[0-9A-Za-z-]{1,20}$/.test(periodo)) {
+      return res.status(400).json({ ok: false, error: 'Periodo inválido' });
+    }
+    if (excedeLimite(`${clientIp(req)}:calificaciones-siia:${req.alumno.matricula}`, 30, 60 * 1000)) {
+      return res.status(429).json({ ok: false, error: 'Demasiadas consultas. Espera un momento.' });
+    }
+
+    const consultar = (p) => {
+      const url = new URL(SIIA_CALIFICACIONES_URL);
+      if (p) url.searchParams.set('periodo', p);
+      return llamarSiia({ metodo: 'GET', url: url.toString(), token: sesion.token });
+    };
+    let siia;
+    let aviso = '';
+    try {
+      siia = await consultar(periodo);
+      // El SIIA puede fallar al calcular "el periodo actual" (BUG-024): se
+      // prueba con los periodos recientes y se muestra el primero que responda.
+      if (!periodo && esErrorGenericoSiia(siia)) {
+        console.error(`[CALIF-SIIA][ERROR-SIIA] matricula=${req.alumno.matricula} periodo="" status=${siia.statusCode} ` +
+          `respuesta=${JSON.stringify(siia.data)?.slice(0, 500)}`);
+        for (const p of periodosRecientes()) {
+          const intento = await consultar(p);
+          console.log(`[CALIF-SIIA][REINTENTO] matricula=${req.alumno.matricula} periodo="${p}" status=${intento.statusCode} ` +
+            `ok=${!!intento.data?.ok} mensaje="${intento.data?.mensaje || ''}"`);
+          if (!esErrorGenericoSiia(intento)) {
+            siia = intento;
+            aviso = `El SIIA no pudo mostrar el periodo actual; se muestra el periodo ${p}.`;
+            break;
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[CALIF-SIIA][RED]', err.message);
+      return res.status(502).json({ ok: false, error: 'No se pudo contactar al SIIA. Intenta más tarde.' });
+    }
+    const { statusCode, data } = siia;
+
+    if (statusCode === 401) {
+      sesionesSiia.delete(req.alumno.sid);
+      res.set('X-Sesion-Invalida', '1');
+      return res.status(401).json({ ok: false, error: 'Tu sesión del SIIA expiró. Inicia sesión de nuevo para ver tus calificaciones.' });
+    }
+    // La respuesta real de calificaciones no siempre trae `ok` (empieza con
+    // "bloqueado"): un 200 con datos es éxito salvo que diga ok:false.
+    if ((statusCode === 403 || statusCode === 200) && data?.bloqueado === true) {
+      // Trámites de inicio de ciclo pendientes en el SIIA: no es un error de la app.
+      console.log(`[CALIF-SIIA][BLOQUEADO] matricula=${req.alumno.matricula}`);
+      return res.json({
+        ok: true,
+        bloqueado: true,
+        mensaje: String(data.mensaje || 'Tus calificaciones están bloqueadas en el SIIA por trámites pendientes.'),
+        pendientes: Array.isArray(data.verificaciones?.pendientes) ? data.verificaciones.pendientes.map(String) : [],
+        periodo: String(data.periodo || periodo || ''),
+        periodosDisponibles: Array.isArray(data.periodosDisponibles) ? data.periodosDisponibles.map(String) : [],
+        resumen: null,
+        calificaciones: []
+      });
+    }
+    if (statusCode === 404) {
+      return res.status(404).json({ ok: false, error: data?.mensaje || 'El SIIA no encontró tu registro de alumno.' });
+    }
+    if (statusCode !== 200 || !data || data.ok === false) {
+      if (periodo) {
+        console.error(`[CALIF-SIIA][ERROR-SIIA] matricula=${req.alumno.matricula} periodo="${periodo}" status=${statusCode} ` +
+          `respuesta=${JSON.stringify(data)?.slice(0, 500)}`);
+      }
+      const detalle = data?.mensaje ? ` (el SIIA respondió: "${data.mensaje}")` : '';
+      return res.status(502).json({
+        ok: false,
+        error: `El SIIA no pudo entregar tus calificaciones${detalle}. Intenta más tarde.`
+      });
+    }
+
+    res.json({
+      ok: true,
+      bloqueado: false,
+      mensaje: '',
+      aviso,
+      pendientes: [],
+      periodo: String(data.periodo || periodo || ''),
+      periodosDisponibles: Array.isArray(data.periodosDisponibles) ? data.periodosDisponibles.map(String) : [],
+      resumen: data.resumen || null,
+      calificaciones: Array.isArray(data.calificaciones) ? data.calificaciones.map(materiaParcial) : []
+    });
+  } catch (err) {
+    console.error('[CALIF-SIIA][ERROR]', err.message);
+    res.status(500).json({ ok: false, error: 'No se pudieron consultar tus calificaciones del SIIA' });
   }
 });
 
@@ -1076,7 +1499,26 @@ app.post('/api/otp/enviar', async (req, res) => {
     } else {
       const r = await db.request().input('Matricula', sql.NVarChar(20), identificador)
         .query(`SELECT IdAlumno, CorreoOtp, CorreoInstitucional FROM dbo.Alumnos WHERE Matricula = @Matricula`);
-      if (!r.recordset[0]) return res.status(404).json({ ok: false, error: 'Alumno no encontrado' });
+      if (!r.recordset[0]) {
+        const sesion = sesionSinRegistro(identificador);
+        if (!sesion) return res.status(404).json({ ok: false, error: 'Alumno no encontrado' });
+        const correo = String(sesion.correo || correoCliente).trim().toLowerCase();
+        if (!correo.includes('@')) {
+          return res.status(400).json({ ok: false, error: 'No hay un correo registrado para esta cuenta. Especifica uno válido.' });
+        }
+        const codigo = String(crypto.randomInt(100000, 1000000));
+        sesion.otp = {
+          codigoHash: crypto.createHash('sha256').update(codigo).digest('hex'),
+          expira: Date.now() + OTP_VALIDEZ_MS,
+          intentos: 0,
+          estado: 'PENDIENTE',
+          correo
+        };
+        sesion.expira = Math.max(sesion.expira, sesion.otp.expira);
+        await enviarCorreoOtp(correo, codigo);
+        console.log(`[OTP][ENVIADO] tipo=ALUMNO id=${identificador} sinRegistro`);
+        return res.json({ ok: true });
+      }
       idAlumno = r.recordset[0].IdAlumno;
       correoGuardado = String(r.recordset[0].CorreoOtp || r.recordset[0].CorreoInstitucional || '').trim().toLowerCase();
     }
@@ -1135,10 +1577,37 @@ app.post('/api/otp/verificar', async (req, res) => {
       : await db.request().input('M', sql.NVarChar(20), identificador)
           .query(`SELECT IdAlumno AS Id FROM dbo.Alumnos WHERE Matricula = @M`);
     const id = idLookup.recordset[0]?.Id;
-    if (!id) return res.status(404).json({ ok: false, error: 'Cuenta no encontrada' });
+    if (!id) {
+      const sesion = tipo === 'ALUMNO' ? sesionSinRegistro(identificador) : null;
+      if (!sesion) return res.status(404).json({ ok: false, error: 'Cuenta no encontrada' });
+      // Mismas reglas que OtpHistorial (DEC-019, DEC-022), pero en memoria (DEC-040).
+      const otpMem = sesion.otp;
+      if (!otpMem || (otpMem.estado !== 'PENDIENTE' && otpMem.estado !== 'VERIFICADO')) {
+        return res.status(400).json({ ok: false, error: 'No hay un código pendiente. Solicita uno nuevo.' });
+      }
+      if (otpMem.expira < Date.now()) {
+        otpMem.estado = 'EXPIRADO';
+        return res.status(400).json({ ok: false, error: 'El código expiró. Solicita uno nuevo.' });
+      }
+      if (otpMem.intentos >= OTP_MAX_INTENTOS) {
+        otpMem.estado = 'FALLIDO';
+        return res.status(429).json({ ok: false, error: 'Demasiados intentos fallidos. Solicita un nuevo código.' });
+      }
+      if (crypto.createHash('sha256').update(codigo).digest('hex') !== otpMem.codigoHash) {
+        otpMem.intentos += 1;
+        console.warn(`[OTP][RECHAZO] tipo=ALUMNO id=${identificador} sinRegistro`);
+        return res.status(401).json({ ok: false, error: 'Código incorrecto', intentosRestantes: Math.max(0, OTP_MAX_INTENTOS - otpMem.intentos) });
+      }
+      otpMem.estado = 'VERIFICADO';
+      console.log(`[OTP][OK] tipo=ALUMNO id=${identificador} sinRegistro`);
+      const token = firmarTokenAlumnoSinRegistro({
+        matricula: identificador, nombre: sesion.nombre, correo: otpMem.correo, carrera: sesion.carrera
+      });
+      return res.json({ ok: true, token, sinRegistro: true });
+    }
 
     const otpResult = await db.request().input('Id', sql.Int, id).query(`
-      SELECT TOP 1 IdOtp, CodigoHash, ExpiraEn, Estado, Intentos
+      SELECT TOP 1 IdOtp, CodigoHash, ExpiraEn, Estado, Intentos, CorreoDestino
       FROM dbo.OtpHistorial WHERE ${columna} = @Id ORDER BY EnviadoEn DESC
     `);
     const otp = otpResult.recordset[0];
@@ -1184,8 +1653,14 @@ app.post('/api/otp/verificar', async (req, res) => {
         const alumno = alumnoRow.recordset[0];
         if (alumno) {
           token = firmarTokenAlumno(alumno);
+          // Si la cuenta no tenía ningún correo, se queda el que acaba de
+          // demostrar que recibe (el del código verificado).
           await db.request().input('Id', sql.Int, alumno.IdAlumno)
-            .query(`UPDATE dbo.Alumnos SET UltimoAcceso = SYSUTCDATETIME() WHERE IdAlumno = @Id`);
+            .input('Correo', sql.NVarChar(255), otp.CorreoDestino)
+            .query(`UPDATE dbo.Alumnos
+                    SET UltimoAcceso = SYSUTCDATETIME(),
+                        CorreoOtp = COALESCE(CorreoOtp, CASE WHEN CorreoInstitucional IS NULL THEN @Correo END)
+                    WHERE IdAlumno = @Id`);
         }
       }
       res.json({ ok: true, token });
@@ -1660,7 +2135,7 @@ app.get('/api/mi-historial/:matricula', requireAlumno(), async (req, res) => {
         WHERE a.Matricula = @Matricula
       `);
     const alumno = alumnoLookup.recordset[0];
-    if (!alumno) return res.status(404).json({ ok: false, error: 'No existe un alumno con esa matrícula' });
+    if (!alumno) return alumnoNoEncontrado(req, res);
 
     const alumnoInfo = {
       matricula, nombreCompleto: alumno.NombreCompleto, semestre: alumno.Semestre,
@@ -1710,6 +2185,22 @@ app.get('/api/mi-perfil/:matricula', requireAlumno(), async (req, res) => {
         WHERE a.Matricula = @Matricula
       `);
     const alumno = lookup.recordset[0];
+    if (!alumno && req.alumno.sinRegistro) {
+      return res.json({
+        ok: true,
+        perfil: {
+          matricula,
+          nombreCompleto: req.alumno.nombre,
+          correoOtp: req.alumno.correo || null,
+          correoInstitucional: null,
+          fechaNacimiento: null,
+          carrera: req.alumno.carrera || null,
+          claveCarrera: null,
+          semestre: null,
+          sinRegistro: true
+        }
+      });
+    }
     if (!alumno) return res.status(404).json({ ok: false, error: 'No existe un alumno con esa matrícula' });
 
     res.json({
@@ -1752,9 +2243,7 @@ app.put('/api/mi-perfil/:matricula', requireAlumno(), async (req, res) => {
         UPDATE dbo.Alumnos SET CorreoOtp = @CorreoOtp WHERE Matricula = @Matricula;
         SELECT @@ROWCOUNT AS Afectados;
       `);
-    if (result.recordset[0].Afectados === 0) {
-      return res.status(404).json({ ok: false, error: 'No existe un alumno con esa matrícula' });
-    }
+    if (result.recordset[0].Afectados === 0) return alumnoNoEncontrado(req, res);
 
     try {
       await ensureAuditTable();
@@ -1779,6 +2268,7 @@ app.post('/api/mi-perfil/cambiar-password', requireAlumno(), async (req, res) =>
     const matricula = String(req.body?.matricula || '').trim();
     const passwordActual = String(req.body?.passwordActual || '');
     const passwordNueva = String(req.body?.passwordNueva || '');
+    if (req.alumno.sinRegistro) return res.status(409).json({ ok: false, error: MENSAJE_SIN_REGISTRO });
     if (!matricula || !passwordActual) {
       return res.status(400).json({ ok: false, error: 'Matrícula y contraseña actual son obligatorias' });
     }
@@ -2068,7 +2558,7 @@ app.get('/api/mi-horario/:matricula', requireAlumno(), async (req, res) => {
         WHERE a.Matricula = @Matricula
       `);
     const alumno = alumnoLookup.recordset[0];
-    if (!alumno) return res.status(404).json({ ok: false, error: 'No existe un alumno con esa matrícula' });
+    if (!alumno) return alumnoNoEncontrado(req, res);
     if (!alumno.ClaveCarrera || !alumno.Semestre) {
       return res.json({ ok: true, dia: NOMBRE_DIA[new Date().getDay() || 7], clases: [] });
     }

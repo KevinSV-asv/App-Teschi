@@ -1,19 +1,13 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
--->
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Respaldo en Android 12 o mayor. La sesión (token del SIIA) y la foto de
+     perfil no se respaldan ni se copian a otro teléfono. -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="sharedpref" path="appteschi_sesion.xml" />
+        <exclude domain="file" path="fotos_perfil/" />
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="sharedpref" path="appteschi_sesion.xml" />
+        <exclude domain="file" path="fotos_perfil/" />
     </device-transfer>
-    -->
 </data-extraction-rules>

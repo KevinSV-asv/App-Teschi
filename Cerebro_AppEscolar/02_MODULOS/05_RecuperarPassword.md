@@ -1,5 +1,7 @@
 # Módulo 5: Recuperar Contraseña
 
+> ⛔ **Histórico (12/10/2026, DEC-043):** Recuperar contraseña se quitó de la app al pasar a usar solo la API del SIIA. El código está en el historial de git; esta nota se conserva como referencia.
+
 - **Estado:** ✅ Implementado y real (ver "Implementación real" al final) — el diseño original de abajo quedó desactualizado en varios puntos (endpoints, alcance).
 - **Ruta en App:** `Routes.RECUPERAR_PASS`
 - **Relacionado con:** [[MAPA_PROYECTO]], [[2FA_Login]]
@@ -8,7 +10,9 @@
 
 ## Descripción General
 
-Permite al alumno restablecer su contraseña del SIIA cuando no puede iniciar sesión. El flujo se basa en verificación por correo institucional.
+Permite al alumno restablecer la contraseña de su **cuenta propia de AppTESCHI** cuando no puede iniciar sesión. La contraseña del SIIA no se puede cambiar desde aquí: se cambia en el portal del SIIA (ver [[2FA_Login]]).
+
+> El flujo de pantalla de abajo es el **diseño original** (histórico). Lo que de verdad está implementado está en "Implementación real", al final.
 
 ---
 
@@ -57,7 +61,7 @@ Permite al alumno restablecer su contraseña del SIIA cuando no puede iniciar se
 
 ## Endpoints API
 
-> ⚠️ **PENDIENTE** — Ver [[01_APIS_POSTMAN]] cuando se documente.
+> Diseño original. Los endpoints reales están en [[Base_Datos_Usuarios]] §"Endpoints de `server.js`" y en la colección de Postman ([[01_POSTMAN_API]]).
 
 ```
 POST /api/auth/recuperar          → Paso 1: solicitar código

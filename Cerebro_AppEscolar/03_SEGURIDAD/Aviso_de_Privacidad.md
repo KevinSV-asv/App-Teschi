@@ -1,5 +1,7 @@
 # Aviso de Privacidad — AppTESCHI
 
+> ⚠️ **Desactualizado (12/10/2026, DEC-043):** describe el sistema con backend propio, base de datos y panel de administrador. Hoy la app solo tiene las pantallas del alumno con datos del SIIA (ver [[REGLAS_PROYECTO]] y [[MAPA_PROYECTO]]). Actualizar antes de entregarlo.
+
 > ⚠️ **Borrador técnico, no un documento legal terminado.** Está redactado con la estructura que exige la Ley Federal de Protección de Datos Personales en Posesión de los Particulares (LFPDPPP) y su Reglamento, a partir de los datos que **realmente** recolecta el sistema (verificado contra el código, no supuesto). Antes de publicarlo o entregarlo a un alumno, debe revisarlo el área jurídica o de protección de datos de la institución — nombra un responsable, domicilio y mecanismos de contacto reales, y confirma que el tratamiento descrito coincide con la política institucional vigente.
 > **Relacionado con:** [[Base_Datos_Usuarios]], [[DECISIONES_TECNICAS]] (DEC-014, DEC-019), [[00_Vision_y_Alcance]]
 

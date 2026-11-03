@@ -1,5 +1,7 @@
 # Plan de Pruebas — AppTESCHI
 
+> ⚠️ **Desactualizado (12/10/2026, DEC-043):** describe el sistema con backend propio, base de datos y panel de administrador. Hoy la app solo tiene las pantallas del alumno con datos del SIIA (ver [[REGLAS_PROYECTO]] y [[MAPA_PROYECTO]]). Actualizar antes de entregarlo.
+
 > Estrategia, alcance, tipos de prueba y herramientas usadas para verificar el sistema.
 > **Relacionado con:** [[02_Catalogo_Casos_de_Prueba]], [[03_Matriz_Trazabilidad]]
 
@@ -73,5 +75,6 @@ Garantizar que cada requerimiento funcional implementado se comporta como se esp
 
 1. **Sin pruebas automatizadas de backend** — toda la verificación de `server.js` es manual con `curl`. Recomendado: suite con Jest + `supertest` contra una base de datos de prueba desechable.
 2. **Sin pruebas de UI automatizadas** — no hay Compose UI Testing; toda verificación visual es manual sobre el APK instalado.
-3. **Sin pruebas de los módulos mock del alumno** más allá de la lógica de sus `ViewModel`s — no aplica todavía una prueba de "flujo real" porque no hay backend real detrás de Reinscripción/Tira/Calificaciones/Kardex del lado del alumno.
+3. **Sin pruebas de flujo completo de los módulos del alumno** — Reinscripción/Tira/Calificaciones/Kardex ya leen el backend real (DEC-023/024), pero solo se prueban sus `ViewModel`s; el flujo de punta a punta se verifica a mano.
 4. **Sin pruebas de concurrencia** — no se ha verificado el comportamiento ante dos administradores editando al mismo alumno simultáneamente.
+5. **Login con el SIIA sin pruebas automatizadas** — depende de un servicio externo con límite de 5 intentos por minuto; se verifica a mano (teléfono y Postman).

@@ -1,5 +1,7 @@
 # Catálogo de Casos de Prueba — AppTESCHI
 
+> ⚠️ **Desactualizado (12/10/2026, DEC-043):** describe el sistema con backend propio, base de datos y panel de administrador. Hoy la app solo tiene las pantallas del alumno con datos del SIIA (ver [[REGLAS_PROYECTO]] y [[MAPA_PROYECTO]]). Actualizar antes de entregarlo.
+
 > Casos de prueba referenciados desde [[03_Matriz_Trazabilidad]]. Los CP-10 en adelante corresponden a verificaciones manuales con `curl` contra la base de datos real, ejecutadas durante la construcción del panel de administrador (DEC-017/018).
 > **Relacionado con:** [[01_Plan_de_Pruebas]], [[03_Matriz_Trazabilidad]]
 

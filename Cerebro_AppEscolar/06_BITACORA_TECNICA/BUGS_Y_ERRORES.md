@@ -165,3 +165,112 @@
 - **Causa real:** Los 5 registros no vienen de ningún script versionado en `database/sql/` — se insertaron por fuera (probablemente con una herramienta que no respetó UTF-8 al escribir el INSERT), mismo tipo de causa que BUG documentado en DEC-014 pero para estos registros puntuales.
 - **Solución:** `database/sql/21_CorregirNombresPruebaCorruptos.sql` — `UPDATE` con los 5 nombres correctos, usando literales `N'...'` y ejecutado con `-f 65001`. Verificado a nivel de bytes tras la corrección.
 - **Estado:** ✅ Resuelto — sin cambios de código, solo datos.
+
+---
+
+## BUG-015 — Login por SIIA siempre "Usuario o contraseña del SIIA incorrectos"
+
+- **Fecha:** 24/09/2026
+- **Síntoma:** cualquier usuario y contraseña del SIIA, aunque fueran correctos, eran rechazados.
+- **Causa:** `/api/auth/siia` no llamaba al SIIA: comparaba contra la columna local `Alumnos.UsuarioSiia`, que estaba vacía.
+- **Solución:** llamada real a `login.ashx` con `https` nativo (`loginSiiaReal()`), ver DEC-035.
+- **Estado:** ✅ Resuelto
+
+---
+
+## BUG-016 — "Este tipo de cuenta del SIIA no está soportado todavía"
+
+- **Fecha:** 24/09/2026
+- **Síntoma:** con credenciales correctas de alumno, el backend respondía 403.
+- **Causa:** el SIIA manda `tipo` como una letra (`"E"` para estudiante) y el código esperaba palabras como `ALUMNO`.
+- **Solución:** `TIPOS_SIIA_CONOCIDOS = { E: 'ALUMNO', D: 'DOCENTE', A: 'ADMINISTRADOR' }` en `mapTipoSiia()`. Solo `E` está confirmado.
+- **Estado:** ✅ Resuelto (`D` y `A` sin confirmar)
+
+---
+
+## BUG-017 — "Matrícula/usuario es obligatorio" al pedir el código tras un login SIIA correcto
+
+- **Fecha:** 25/09/2026
+- **Síntoma:** el login SIIA pasaba, pero al tocar "Enviar código" aparecía ese error.
+- **Causa (dos a la vez):** (1) `SiiaAuthService.kt` leía `matricula`/`usuario` de la respuesta, pero el backend manda `identificador`, así que la app se quedaba sin matrícula; (2) el backend exigía un correo escrito por el cliente, que el flujo SIIA nunca pide.
+- **Solución:** la app lee `identificador` (con respaldo a los nombres viejos); `AuthViewModel` no valida el correo en el flujo SIIA; `/api/otp/enviar` usa el correo guardado en el servidor.
+- **Estado:** ✅ Resuelto — probado de punta a punta con un alumno real en el teléfono.
+
+---
+
+## BUG-018 — Scripts de despliegue fallan en Ubuntu: `set: pipefail\r: invalid option name`
+
+- **Fecha:** 24/09/2026
+- **Síntoma:** `bash deploy/aplicar.sh` (y los demás `.sh`) fallaban en la primera línea.
+- **Causa:** los `.sh` tenían saltos de línea CRLF de Windows.
+- **Solución:** se convirtieron a LF y `.gitattributes` fija `*.sh text eol=lf` para que no vuelva a pasar.
+- **Estado:** ✅ Resuelto
+
+---
+
+## BUG-019 — El servidor seguía respondiendo con código viejo después de desplegar
+
+- **Fecha:** 24/09/2026
+- **Síntoma:** tras desplegar, la API respondía mensajes que ya no existían en el código.
+- **Causa:** un `node server.js` lanzado a mano el 23/09 con `nohup` (PID 694322) seguía ocupando el puerto 4000, así que el servicio `appteschi-api` de systemd no podía arrancar el código nuevo.
+- **Solución:** `sudo ss -lptn 'sport = :4000'` para ver quién tiene el puerto, matar ese proceso y dejar solo el servicio de systemd. **Regla:** nunca arrancar el backend del servidor a mano; siempre `sudo systemctl restart appteschi-api`.
+- **Estado:** ✅ Resuelto
+
+---
+
+## BUG-020 — `sqlcmd` en el servidor: certificado autofirmado y `QUOTED_IDENTIFIER`
+
+- **Fecha:** 27/09/2026
+- **Síntoma 1:** `SSL Provider: certificate verify failed: self-signed certificate`. **Causa:** el driver ODBC 18 exige TLS válido y el SQL Server del contenedor usa un certificado autofirmado. **Solución:** agregar `-C` (confiar en el certificado del servidor).
+- **Síntoma 2:** `CREATE INDEX failed` / `UPDATE failed because … 'QUOTED_IDENTIFIER'`. **Causa:** `sqlcmd` arranca con `QUOTED_IDENTIFIER OFF` y las tablas con índices filtrados (`Alumnos`, `CatalogoCarreras`) lo exigen incluso para un `UPDATE`. **Solución:** empezar cada script o consulta con `SET QUOTED_IDENTIFIER ON;`.
+- **Estado:** ✅ Documentado en [[04_Manual_Mantenimiento]] §7
+
+---
+
+## BUG-021 — "Matrícula/usuario es obligatorio" otra vez, usando la app fuera de casa
+
+- **Fecha:** 28/09/2026
+- **Síntoma:** login por el SIIA correcto (se ve el correo enmascarado), pero al tocar "Enviar código" aparece "Matrícula/usuario es obligatorio".
+- **Diagnóstico:** el mensaje lo manda `/api/otp/enviar` cuando la app no envía matrícula. Se revisó todo: el servidor corre el código de `3bbb1a9` (mismo tamaño de `server.js`, 114 150 bytes) y sí responde `identificador`; el código actual de la app y la última compilación (24/09, 20:11) sí lo leen (BUG-017). Nada en el código depende de estar en casa o fuera. Conclusión más probable: el teléfono tiene instalada una compilación anterior al arreglo de BUG-017. No había forma de saber qué versión tenía instalada.
+- **Solución:**
+  - `AuthRepository.loginSiia`: si la respuesta no trae la matrícula, usa el usuario que escribió el alumno (en el SIIA es su matrícula).
+  - `AuthViewModel`: si falta matrícula o ticket, no llama al backend y muestra "Se perdió la sesión de verificación. Toca Regresar e inicia sesión de nuevo."
+  - El login muestra la versión y la fecha de compilación (`v1.1 · compilada dd/MM/yyyy HH:mm`) para saber siempre qué APK tiene el teléfono.
+  - 2 pruebas nuevas en `AuthViewModelTest`; 6 pruebas existentes ahora pasan por el login antes de pedir el código (el caso real).
+- **Estado:** ⏳ Código listo; falta compilar e instalar la app nueva en el teléfono y probar fuera de casa.
+
+---
+
+## BUG-022 — Alumno del SIIA sin correo: se quedaba en el login sin poder pedir el código
+
+- **Fecha:** 28/09/2026
+- **Síntoma:** (encontrado al revisar el código, sin reporte previo) si el SIIA no trae correo y la cuenta registrada en AppTESCHI no tiene ninguno guardado, el alumno no podía completar el inicio de sesión.
+- **Causa (tres a la vez):** (1) la respuesta `requiereCorreo` de `/api/auth/siia` no incluía el ticket de login, que `/api/otp/enviar` exige desde DEC-030; (2) la app marcaba `siiaRequiereCorreo` pero la pantalla no lo usaba, así que se quedaba en el formulario sin mensaje; (3) el correo que escribía el alumno solo se usaba para ese envío y nunca se guardaba, así que lo habría pedido en cada login aunque [[2FA_Login]] decía "una sola vez".
+- **Solución:** el backend responde siempre con ticket y `correoEnmascarado` vacío cuando no hay correo; la app ya sabía manejar eso (pasa a la verificación y pide el correo). `/api/otp/verificar` guarda ese correo como `CorreoOtp` al verificar el código, solo si la cuenta no tenía ninguno.
+- **Estado:** ✅ Probado en local con un SIIA simulado (v0.29); falta desplegar.
+
+---
+
+## BUG-023 — La fecha de compilación del login no cambiaba entre builds
+
+- **Fecha:** 28/09/2026
+- **Síntoma:** un APK compilado a las 12:41 mostraba "compilada 28/09/2026 11:40". Justo lo contrario de lo que buscaba BUG-021 (saber qué APK tiene el teléfono).
+- **Causa:** `FECHA_COMPILACION` se calculaba con `LocalDateTime.now()` dentro de `defaultConfig`, que corre en la fase de configuración de Gradle. Con `org.gradle.configuration-cache=true`, si solo cambió código Kotlin se reutiliza la configuración guardada y la fecha queda congelada en la de ese momento.
+- **Solución:** la fecha sale de un `ValueSource` (`FechaCompilacion` en `app/build.gradle.kts`) conectado con `androidComponents.onVariants { buildConfigFields }`: Gradle lo recalcula en cada build aunque reutilice la caché.
+- **Verificado:** dos builds con un minuto de diferencia y la caché reutilizada ("Reusing configuration cache") dan 12:42 y 12:43; el login del teléfono muestra "compilada 28/09/2026 12:43".
+- **Estado:** ✅ Resuelto
+
+---
+
+## BUG-024 — Calificaciones: "No fue posible procesar la solicitud."
+
+- **Fecha:** 30/09/2026
+- **Síntoma:** con el backend de DEC-042 desplegado, el alumno entra con usuario + NIP del SIIA (el login funciona) y al abrir Calificaciones ve "No fue posible procesar la solicitud." con el botón Reintentar.
+- **Qué se sabe:** ese texto no existe en AppTESCHI: es el `mensaje` que devolvió `calificaciones/parciales.ashx` del SIIA, reenviado tal cual por `/api/mi-calificaciones-siia`. No es un problema de token: con un token inválido el SIIA responde 401 "Token requerido o inválido…" (comprobado), y ese caso la app lo trata como sesión vencida. O sea, el SIIA aceptó el token y falló al procesar la consulta.
+- **Hipótesis principal:** el backend (Node) llamaba al SIIA **sin `User-Agent`**, a diferencia de Postman o un navegador; hay servidores ASP.NET que fallan con un error genérico cuando falta. Otras posibles: error del SIIA al calcular el periodo actual o las verificaciones de trámites de esa cuenta (del lado de la escuela).
+- **Cambios:** todas las llamadas al SIIA mandan `User-Agent: AppTESCHI-API/1.1`; el error ahora dice que fue el SIIA ("El SIIA no pudo entregar tus calificaciones (el SIIA respondió: …)") y el log guarda el status y la respuesta del SIIA (`[CALIF-SIIA][ERROR-SIIA] … status=… respuesta=…`); nueva petición "5. Calificaciones parciales" en Postman (y `nip` en el login directo) para probar el SIIA sin pasar por AppTESCHI. Prueba local 18/18.
+- **Resultado del primer cambio (30/09/2026, 10:00):** desplegado; el mensaje ya dice "El SIIA no pudo entregar tus calificaciones (el SIIA respondió: …)", así que el `User-Agent` **no** era la causa. El SIIA acepta el token y falla al procesar.
+- **Segundo cambio — reintento por periodo:** hipótesis nueva: el SIIA falla al calcular "el periodo actual" cuando no se le manda `periodo` (p. ej. un alumno de noveno que en el periodo en curso solo tiene Residencias). Si la consulta sin periodo da un error genérico (5xx, 400 o 200 con `ok: false`), el backend prueba con los tres periodos más recientes (`periodosRecientes()`: hoy 2026-2, 2026-1, 2025-2; supuesto: "-1" = febrero–julio, "-2" = agosto–enero) y muestra el primero que responda, con el aviso "El SIIA no pudo mostrar el periodo actual; se muestra el periodo …". Cada intento queda en el log (`[CALIF-SIIA][REINTENTO]`). Un periodo elegido a mano no se reintenta. En la app: el aviso se muestra arriba de la lista, y si falla un periodo elegido se conservan las parciales que se veían con un aviso de error (antes la pantalla se quedaba en error). Pruebas: backend 23/23, app 135/135.
+- **Confirmado directo contra el SIIA (30/09/2026, sin pasar por AppTESCHI):** en Postman, `GET {{siia_base_url}}/calificaciones/parciales.ashx` con un token válido (login + NIP correctos) da **500** `{"ok": false, "mensaje": "No fue posible procesar la solicitud."}` en los 5 casos probados: sin `periodo`, `2026-2`, `2026-1`, `2025-1` y `2025-2`. Mismo resultado con dos cuentas de alumno distintas. No es cuestión de periodo — el reintento de `server.js` no va a encontrar ninguno que funcione. Encabezados de la respuesta: `Server: Microsoft-IIS/8.0`, `X-Powered-By: ASP.NET`, `X-Aspnet-Version: 4.0.30319`.
+- **Estado:** ✅ Resuelto por la escuela (05/10/2026). El alumno lo reportó y los administradores del SIIA lo corrigieron; en Postman `calificaciones/parciales.ashx?periodo=2025-2` ya responde **200** con `periodosDisponibles` de 2022-2 a 2026-2, `alumno`, `verificaciones` y las materias. Confirma además el supuesto de periodos de `periodosRecientes()` (el actual es 2026-2).
+- **Ajuste por la respuesta real (v0.34):** la respuesta de calificaciones empieza con `"bloqueado"` y el `"ok": true` no aparece al inicio como en login/NIP (puede faltar). `server.js` ahora toma un 200 como éxito salvo que diga `ok: false`, y trata `bloqueado: true` igual venga con 403 o con 200. El reintento por periodo se queda como respaldo.

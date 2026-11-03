@@ -1,11 +1,13 @@
 # AppTeschi API
 
+> ⛔ **Histórico (12/10/2026, DEC-043):** la app ya no usa este backend; habla directo con la API del SIIA. Se conserva en el repositorio solo como referencia.
+
 API (Node.js + Express + SQL Server) de la app Android AppTESCHI. Toda la
 persistencia pasa por aquí: la app nunca se conecta directo a SQL Server.
 
 ## Requisitos
 
-- Node.js 22 (se desarrolla y prueba con 22.16.0)
+- Node.js 22 (servidor: 22.16.0 en `/opt/node`)
 - SQL Server con la base `AppTeschiDB` (scripts en `04_BASE_DATOS/sql/`, en orden)
 - Archivo `.env` basado en `.env.example`
 
@@ -18,12 +20,15 @@ npm start
 
 Si `JWT_SECRET` falta o tiene menos de 32 caracteres, la API no arranca.
 
-## Autenticación (DEC-030)
+## Autenticación (DEC-030, DEC-035)
 
-1. `POST /api/auth/cuenta` (alumno) o `POST /api/auth/administrador`: valida
-   usuario y contraseña y responde con un **ticket** de 10 minutos.
+1. Validar credenciales y recibir un **ticket** de 10 minutos:
+   - `POST /api/auth/cuenta` — alumno con cuenta propia.
+   - `POST /api/auth/administrador` — administrador.
+   - `POST /api/auth/siia` — alumno con su usuario del SIIA; el backend llama a la
+     API oficial (`login.ashx`). Solo entra si su matrícula ya existe en `Alumnos`.
 2. `POST /api/otp/enviar` y `POST /api/otp/verificar`: exigen ese ticket en el
-   cuerpo (`ticket`). Sin él responden 401.
+   cuerpo (`ticket`). Sin él responden 401. El correo destino lo decide el servidor.
 3. `POST /api/otp/verificar` correcto responde con un **token de sesión**
    (`token`, 12 h) que se manda como `Authorization: Bearer <token>`.
 
@@ -38,7 +43,8 @@ uno nunca sirve donde se espera otro.
 
 ## Variables de entorno
 
-Ver `.env.example`. Las de despliegue detrás de un túnel (`HOST`,
+Ver `.env.example`. El correo del OTP sale por Microsoft Graph si están las cuatro
+`MS_*` (cuenta institucional); si falta alguna, por SMTP (`EMAIL_*`). Las de despliegue detrás de un túnel (`HOST`,
 `TRUST_CLOUDFLARE`) solo se activan juntas y solo con la API escuchando en
 `127.0.0.1`.
 
@@ -47,8 +53,6 @@ Ver `.env.example`. Las de despliegue detrás de un túnel (`HOST`,
 Ver la carpeta `deploy/` (scripts numerados, servicio `systemd`, SQL Server en
 Docker y respaldo diario).
 
-## Notas
+## Pruebas manuales
 
-- `Postman_Collection_AppTeschi.json` está **desactualizado** (todavía describe
-  la `x-api-key` y `/api/usuarios/sync`, que ya no existen). Hay que regenerarlo
-  antes de usarlo.
+Colección y entornos de Postman en esta carpeta; guía en `01_APIS_POSTMAN/01_POSTMAN_API.md` de la bóveda.

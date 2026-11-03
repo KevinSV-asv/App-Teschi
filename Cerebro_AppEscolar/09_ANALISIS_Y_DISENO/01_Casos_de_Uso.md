@@ -1,5 +1,7 @@
 # Casos de Uso — AppTESCHI
 
+> ⚠️ **Desactualizado (12/10/2026, DEC-043):** describe el sistema con backend propio, base de datos y panel de administrador. Hoy la app solo tiene las pantallas del alumno con datos del SIIA (ver [[REGLAS_PROYECTO]] y [[MAPA_PROYECTO]]). Actualizar antes de entregarlo.
+
 > Actores, diagrama de casos de uso y descripción detallada de los flujos más relevantes.
 > **Relacionado con:** [[01_Requerimientos_Funcionales]], [[03_Matriz_Trazabilidad]], [[03_Diagramas_Secuencia]]
 
@@ -12,7 +14,8 @@
 | **Alumno** | Estudiante inscrito en TESCHI, consume la app desde su celular |
 | **Administrador** | Personal de control escolar, con control total sobre alumnos, calificaciones y auditoría |
 | **Sistema** | Procesos automáticos del backend (auditoría, envío de OTP, validación de reglas) — actor secundario, no interactivo |
-| **SIIA** | Sistema institucional externo, actor externo consultado por scraping |
+| **SIIA** | Sistema institucional externo. El backend consulta su API oficial (`login.ashx`) solo para validar contraseñas (DEC-035) |
+| **Docente** | ⏳ Actor futuro (Fase 3 del [[09_Login_SIIA_por_Tipo]]); hoy no tiene casos de uso |
 
 ## Diagrama de casos de uso
 
@@ -96,20 +99,26 @@ flowchart LR
 
 ### CU-01 — Iniciar sesión
 
+> Actualizado 27/09/2026 (antes describía el scraping del SIIA y el OTP en el teléfono).
+
 - **Actor principal:** Alumno / Administrador
-- **Actor secundario:** SIIA (externo), Sistema (envío de OTP)
-- **Precondiciones:** El usuario tiene una matrícula registrada (localmente o en el SIIA) o es el administrador de desarrollo.
+- **Actor secundario:** SIIA (externo, API oficial), Sistema (envío de OTP por Microsoft Graph)
+- **Precondiciones:** El usuario existe en AppTESCHI (alumno dado de alta o registrado, o administrador) **o** es alumno con usuario del SIIA; en ese caso entra sin registro y solo ve los datos del SIIA (DEC-040).
 - **Flujo principal:**
-  1. El usuario captura matrícula y contraseña.
-  2. El sistema intenta validar en cascada: (a) bypass de administrador local, (b) usuarios de prueba (solo builds debug), (c) cuenta propia contra `AlumnoCredenciales`, (d) SIIA por scraping.
-  3. Si alguna fuente acepta las credenciales y no es el bypass de administrador, el sistema pide un correo de contacto y envía un código OTP de 6 dígitos.
-  4. El usuario captura el código; el sistema lo valida contra el generado en memoria (vigencia 10 minutos).
-  5. El sistema crea la sesión (`UserSession`) y navega al dashboard según el rol.
+  1. El usuario captura su matrícula o usuario y su contraseña (de AppTESCHI o del SIIA) en un solo formulario.
+  2. Se valida en cascada: `AdministradorCredenciales` → `AlumnoCredenciales` → API oficial del SIIA (y luego se busca la matrícula en `Alumnos`).
+  3. Si es válido, el backend emite un ticket de 10 minutos y envía un código de 6 dígitos al correo **guardado** de la cuenta (la app lo muestra enmascarado).
+  4. El usuario captura el código; el backend lo valida (10 minutos, 5 intentos).
+  5. El backend emite el token de sesión (12 h) y la app navega al dashboard según el rol.
 - **Flujos alternativos:**
-  - 2a. Ninguna fuente acepta las credenciales → se muestra "Usuario o contraseña incorrectos" y se registra un evento de auditoría local de tipo "Acceso rechazado".
-  - 4a. Código incorrecto → contador de intentos fallidos; si se alcanza el umbral configurado, se bloquea el intento.
-  - 4b. Código expirado (>10 min) → se exige reenviar.
-- **Postcondiciones:** Sesión activa con matrícula, nombre y rol establecidos.
+  - 2a. Credenciales incorrectas → "Usuario o contraseña incorrectos".
+  - 2b. (SIIA) La matrícula no existe en AppTESCHI → entra sin registro: ve nombre, carrera y correo del SIIA; los módulos académicos indican que aún no tiene registro (DEC-040). No se crea nada en la base.
+  - 2c. (SIIA) La carrera del alumno no está mapeada → aviso de cuenta pendiente (DEC-037).
+  - 2d. (SIIA) Tipo docente o administrativo → aún no soportado.
+  - 2e. Demasiados intentos → 429, esperar.
+  - 3a. La cuenta no tiene correo → la app lo pide; queda guardado al verificar el código (BUG-022).
+  - 4a. Código incorrecto o vencido → reintentar o reenviar.
+- **Postcondiciones:** Sesión activa con matrícula, nombre, rol y token.
 
 ### CU-08 — Registrar alumno (administrador)
 
@@ -182,12 +191,12 @@ flowchart LR
 
 | CU | Resumen | Complejidad |
 |---|---|---|
-| CU-02 | Registrar cuenta propia con contraseña; completa un perfil existente si ya fue sincronizado desde el SIIA | Media |
+| CU-02 | Registrar cuenta propia con contraseña; completa un perfil existente si ya lo creó el administrador | Media |
 | CU-03 | Ver tarjetas de módulos disponibles en el dashboard del alumno | Baja |
-| CU-04 | Elegir periodo/grupo y enviar solicitud de reinscripción (mock) | Media |
-| CU-05 | Ver materias pendientes del semestre actual (mock) | Baja |
-| CU-06 | Ver calificaciones y promedio del semestre actual (mock) | Baja |
-| CU-07 | Ver kardex completo y exportarlo a PDF (cálculo real sobre datos mock) | Media |
+| CU-04 | Elegir periodo/grupo y enviar solicitud de reinscripción | Media |
+| CU-05 | Ver materias pendientes del semestre actual | Baja |
+| CU-06 | Ver calificaciones y promedio del semestre actual | Baja |
+| CU-07 | Ver kardex completo y exportarlo a PDF | Media |
 | CU-09 | Buscar/filtrar el directorio completo de alumnos | Baja |
 | CU-10 | Editar campos individuales de un alumno sin afectar los demás | Baja |
 | CU-12 | Alternar `Activo` de un alumno con confirmación | Baja |

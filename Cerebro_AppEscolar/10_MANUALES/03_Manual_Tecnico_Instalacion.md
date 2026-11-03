@@ -1,6 +1,8 @@
 # Manual Técnico de Instalación y Configuración — AppTESCHI
 
-> Guía para levantar el entorno completo desde cero: base de datos, backend, app Android y túnel de desarrollo.
+> ⚠️ **Desactualizado (12/10/2026, DEC-043):** describe el sistema con backend propio, base de datos y panel de administrador. Hoy la app solo tiene las pantallas del alumno con datos del SIIA (ver [[REGLAS_PROYECTO]] y [[MAPA_PROYECTO]]). Actualizar antes de entregarlo.
+
+> Guía para levantar el entorno completo desde cero: base de datos, backend, app Android y servidor. Actualizada 27/09/2026.
 > **Relacionado con:** [[05_Diagrama_Despliegue]], [[Base_Datos_Usuarios]], [[04_Manual_Mantenimiento]]
 
 ---
@@ -15,7 +17,7 @@
 | SQL Server Management Studio (SSMS) | 19+ | Administrar la base de datos, ver el diagrama ER |
 | Node.js | 18+ | Ejecutar `AppTeschi.Api` |
 | `sqlcmd` | Incluido con SQL Server / herramientas de línea de comandos | Ejecutar los scripts `.sql` |
-| `cloudflared` | Cualquiera reciente | Exponer el backend local a internet durante desarrollo |
+| Postman | Cualquiera reciente | Probar la API y la API del SIIA ([[01_POSTMAN_API]]) |
 
 ---
 
@@ -23,7 +25,7 @@
 
 ### 2.1 Crear la base y aplicar las migraciones
 
-Los scripts viven en `database/sql/` (repo) y están espejados en `04_BASE_DATOS/sql/` (bóveda). **Deben ejecutarse en este orden exacto** — cada uno es idempotente (se puede volver a correr sin duplicar datos):
+Los scripts viven en `Cerebro_AppEscolar/04_BASE_DATOS/sql/` (una sola copia). **Deben ejecutarse en este orden exacto** — la lista completa, con 17 a 25, está en [[Base_Datos_Usuarios]] §"Ubicación de los scripts" — cada uno es idempotente (se puede volver a correr sin duplicar datos):
 
 ```
 01_CrearBaseDatos.sql
@@ -47,7 +49,7 @@ Los scripts viven en `database/sql/` (repo) y están espejados en `04_BASE_DATOS
 Ejecución recomendada (Windows Authentication, usuario con privilegios de `sysadmin`; `-f 65001` es obligatorio para que los acentos no se corrompan):
 
 ```bash
-sqlcmd -S localhost -d AppTeschiDB -E -f 65001 -i "database/sql/01_CrearBaseDatos.sql"
+sqlcmd -S localhost -d AppTeschiDB -E -f 65001 -i "Cerebro_AppEscolar/04_BASE_DATOS/sql/01_CrearBaseDatos.sql"
 # repetir para cada script, en orden
 ```
 
@@ -74,8 +76,8 @@ En SSMS: clic derecho en `AppTeschiDB` → `Database Diagrams` → `New Database
 
 ## 3. Backend (`AppTeschi.Api`)
 
-> Vive dentro de la bóveda, no en el repo de Android: `07_BACKEND/AppTeschi.Api/`
-> (ruta completa en esta máquina: `C:\Users\kevin\Downloads\Cerebro_AppEscolar\Cerebro_AppEscolar\07_BACKEND\AppTeschi.Api`).
+> Vive dentro de la bóveda, que está dentro del repo: `Cerebro_AppEscolar/07_BACKEND/AppTeschi.Api/`
+> (en esta máquina: `C:\Users\kevin\AndroidStudioProjects\AppTeschi\Cerebro_AppEscolar\07_BACKEND\AppTeschi.Api`).
 
 ### 3.1 Instalar dependencias
 
@@ -100,6 +102,13 @@ EMAIL_SENDER=...
 EMAIL_APP_PASSWORD=...
 EMAIL_SMTP_HOST=smtp.gmail.com
 EMAIL_SMTP_PORT=587
+# Correo institucional por Microsoft Graph (si están las 4, se usa en vez de SMTP; DEC-034)
+MS_TENANT_ID=...
+MS_CLIENT_ID=...
+MS_CLIENT_SECRET=...
+MS_SENDER=...
+# Opcional: la URL del login del SIIA ya viene por defecto
+#SIIA_LOGIN_URL=https://siia.teschi.edu.mx/Teschi/api/login.ashx
 ```
 
 ### 3.3 Ejecutar
@@ -122,6 +131,8 @@ Ver la tabla completa en [[Base_Datos_Usuarios]] §"Endpoints de `server.js`" �
 ---
 
 ## 4. Túnel de desarrollo (exponer el backend a internet)
+
+> ⚠️ **Histórico.** Así se trabajó antes del servidor (hasta el 18/09/2026). Hoy el backend vive en el servidor Ubuntu (§8) y la app apunta a él por Tailscale; el túnel rápido ya no se usa. Se conserva por si hace falta exponer un backend de desarrollo.
 
 Mientras no exista un dominio institucional fijo, el backend local se expone con un túnel rápido de Cloudflare. Desde el 14/09/2026 `cloudflared` está instalado de forma permanente (`winget install Cloudflare.cloudflared`) — ya no depende de `npx` ni de internet para descargarlo cada vez.
 
@@ -181,6 +192,8 @@ El APK resultante se instala manualmente en un dispositivo o emulador (`adb inst
 
 ## 6. Arranque en un solo paso (`iniciar-appteschi.ps1`)
 
+> ⚠️ **Histórico** (entorno de desarrollo previo al servidor, ver §4). El arranque automático en la laptop está desactivado desde el 18/09/2026 (DEC-031).
+
 Script en la raíz del repo Android (`iniciar-appteschi.ps1`) que automatiza los pasos 3 y 4 (backend + túnel) y deja `local.properties` con la URL del túnel ya actualizada:
 
 ```powershell
@@ -211,7 +224,7 @@ El backend y la base de datos corren en un servidor Ubuntu Server 26.04.1 LTS en
 
 | Pieza | Cómo corre |
 |---|---|
-| API (`AppTeschi.Api`) | Servicio `systemd` `appteschi-api`, usuario `appteschi`, código en `/opt/appteschi/api`, Node 22.16.0 en `/opt/node` (binario oficial verificado con SHA256) |
+| API (`AppTeschi.Api`) | Servicio `systemd` `appteschi-api`, usuario `appteschi`, código en `/opt/appteschi/api`, Node 22.16.0 en `/opt/node` (binario oficial verificado con SHA256). **Nunca** arrancarla a mano con `node`/`nohup` (BUG-019) |
 | SQL Server 2022 Express | Contenedor Docker `appteschi-sql`, publicado **solo en `127.0.0.1:1433`**, datos en un volumen nombrado, límite de 2 GB de RAM |
 | Login de la API | `appteschi_api` con `db_owner` solo en `AppTeschiDB` (la API ya no usa `sa`) |
 | Respaldos | `cron` diario a las 03:15 → `/opt/appteschi/backups`, verificados (`RESTORE VERIFYONLY`), comprimidos, 14 días de retención |
@@ -241,7 +254,15 @@ El backend y la base de datos corren en un servidor Ubuntu Server 26.04.1 LTS en
 6. **Probar:** `curl http://IP:4000/health` por LAN y por Tailscale; sin sesión, `GET /api/mi-perfil/<matrícula>` debe dar 401.
 7. **App:** la dirección de fábrica (`API_BASE_URL` en `local.properties`) es la IP de Tailscale del servidor, `http://100.111.170.32:4000`: funciona en casa y fuera de ella si el teléfono tiene Tailscale encendido. Sin Tailscale y en casa, "⚙ Servidor" en el login permite fijar `http://192.168.0.252:4000` sin recompilar. **Comprobar a qué servidor apunta de verdad:** el texto "⚙ Servidor: …" del login muestra la dirección activa; y apagar el backend de la laptop, que es el error que ya pasó (DEC-031).
 
-**Actualizar el backend después:** `.\deploy\deploy-desde-windows.ps1 -Servidor usuario@ip` (pide la contraseña de `sudo`).
+**Actualizar el backend después** (desde la raíz del repo, en PowerShell):
+
+```powershell
+.\Cerebro_AppEscolar\07_BACKEND\AppTeschi.Api\deploy\deploy-desde-windows.ps1 -Servidor kevin_sanvar@100.111.170.32
+```
+
+Sube el código, corre `aplicar.sh` y reinicia el servicio (pide la contraseña de `sudo`). Luego verifica con `sudo systemctl status appteschi-api --no-pager` y `sudo journalctl -u appteschi-api -n 50`.
+
+> En curso (27/09/2026): dejar el servidor con el repo clonado en `/opt/appteschi/repo` para actualizar con `git pull` + `sudo systemctl restart appteschi-api`. Hasta que se termine, el método vigente es el script de arriba.
 
 ### 8.3 Problemas que aparecieron y su solución
 
@@ -251,7 +272,11 @@ El backend y la base de datos corren en un servidor Ubuntu Server 26.04.1 LTS en
 | API en bucle de reinicios: `Cannot find module 'express'` | Nunca se corrió `npm ci` en el servidor: al subir el código por primera vez aún no existía el usuario `appteschi` | `01-instalar.sh` ahora llama a `aplicar.sh`; ejecutarlo o volver a desplegar |
 | `curl: (3) URL rejected: Malformed input` al final de la restauración | El `.env` viene de Windows con saltos CRLF: `PORT=4000\r` | `aplicar.sh` y `02-restaurar-bd.sh` quitan los `\r`; la comprobación final ahora reintenta 20 s |
 
-Ninguno de los tres afectaba a los datos: la restauración terminó bien antes de que fallara la comprobación.
+| `set: pipefail\r: invalid option name` al correr un `.sh` | Scripts con saltos CRLF de Windows (BUG-018) | Convertidos a LF; `.gitattributes` lo fuerza |
+| La API responde con código viejo tras desplegar | Un `node server.js` lanzado a mano ocupa el puerto 4000 (BUG-019) | `sudo ss -lptn 'sport = :4000'`, matar ese PID y `sudo systemctl restart appteschi-api` |
+| `sqlcmd`: `certificate verify failed` o error de `QUOTED_IDENTIFIER` | Driver ODBC 18 y tablas con índices filtrados (BUG-020) | `-C` y `SET QUOTED_IDENTIFIER ON` — ver [[04_Manual_Mantenimiento]] §7 |
+
+Ninguno de los tres primeros afectaba a los datos: la restauración terminó bien antes de que fallara la comprobación.
 
 ### 8.4 Firewall
 

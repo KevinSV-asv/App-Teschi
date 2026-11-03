@@ -1,5 +1,7 @@
 # Requerimientos No Funcionales — AppTESCHI
 
+> ⚠️ **Desactualizado (12/10/2026, DEC-043):** describe el sistema con backend propio, base de datos y panel de administrador. Hoy la app solo tiene las pantallas del alumno con datos del SIIA (ver [[REGLAS_PROYECTO]] y [[MAPA_PROYECTO]]). Actualizar antes de entregarlo.
+
 > Cualidades del sistema, no funciones puntuales. Organizados por categoría ISO/IEC 25010 (calidad de producto de software).
 > **Relacionado con:** [[00_Vision_y_Alcance]], [[01_Requerimientos_Funcionales]], [[03_Matriz_Trazabilidad]]
 
@@ -19,7 +21,7 @@
 |---|---|---|
 | RNF-010 | Las contraseñas de cuentas propias nunca se almacenan en texto plano | `AlumnoCredenciales` guarda `ContrasenaHash`/`ContrasenaSalt` (scrypt), nunca la contraseña |
 | RNF-011 | Todo endpoint del panel de administrador debe verificar la identidad real de quien llama, no solo una clave compartida | `requireAdmin(...)` valida un JWT firmado por el servidor (DEC-020); `writeAudit` usa esa identidad verificada, no headers declarados por el cliente |
-| RNF-012 | La sesión ASP.NET del SIIA debe mantenerse solo en memoria, nunca persistirse en disco sin cifrar | `InMemoryCookieJar.kt` |
+| RNF-012 | La contraseña y el token del SIIA nunca deben guardarse ni pasar por el teléfono más allá del formulario de login: el backend los usa una vez para validar y los descarta | `/api/auth/siia` + `loginSiiaReal()` (DEC-035) |
 | RNF-013 | El código OTP debe generarse y verificarse en el servidor, nunca confiando en que el cliente lo compare correctamente | `POST /api/otp/enviar`/`verificar` (ver DEC-019) — la app nunca conoce el código correcto |
 | RNF-014 | El campo de captura de OTP debe usar un teclado que no sugiera autocompletado del sistema | `KeyboardType.NumberPassword` |
 | RNF-015 | Toda acción administrativa debe quedar auditada de forma que no pueda desactivarse desde la app | `writeAudit(...)` se ejecuta en el propio backend, no es opcional desde el cliente |
@@ -55,13 +57,13 @@
 | RNF-041 | Toda decisión de arquitectura relevante debe documentarse con su razonamiento | [[DECISIONES_TECNICAS]] (DEC-001 → DEC-018 y siguientes) |
 | RNF-042 | Todo cambio de código relevante debe quedar versionado en una bitácora legible | [[CAMBIOS_DE_CODIGO]] (v0.1 → v0.19 y siguientes) |
 | RNF-043 | La lógica de red debe estar detrás de interfaces inyectables para permitir pruebas sin red real | `PlanEstudiosApi`, `CuentaAuthService`, `SiiaAuth` como interfaces con implementación real + *fakes* de prueba |
-| RNF-044 | Los scripts SQL deben ser idempotentes (poder ejecutarse más de una vez sin error) | Todos los scripts en `database/sql/` usan `IF NOT EXISTS`/`IF OBJECT_ID(...) IS NULL` |
+| RNF-044 | Los scripts SQL deben ser idempotentes (poder ejecutarse más de una vez sin error) | Todos los scripts en `04_BASE_DATOS/sql/` usan `IF NOT EXISTS`/`IF OBJECT_ID(...) IS NULL` |
 
 ## Portabilidad (Portability)
 
 | ID | Descripción | Criterio de aceptación |
 |---|---|---|
-| RNF-050 | La URL base y la API key del backend deben configurarse por entorno, sin hardcodear en el código Kotlin | `ApiConfig.kt` lee de `BuildConfig`, generado desde `local.properties` |
+| RNF-050 | La URL base del backend debe configurarse por entorno, sin hardcodear en el código Kotlin (ya no hay API key, DEC-030) | `ApiConfig.kt` lee de `BuildConfig`, generado desde `local.properties`; "⚙ Servidor" en el login permite cambiarla sin recompilar |
 | RNF-051 | El backend debe poder apuntar a un servidor SQL distinto solo cambiando variables de entorno | `.env` con `DB_SERVER`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` |
 
 ## Escalabilidad (Scalability)

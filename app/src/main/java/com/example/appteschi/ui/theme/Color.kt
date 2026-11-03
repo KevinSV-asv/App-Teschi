@@ -32,6 +32,13 @@ val OnErrorContainer   = ErrorRed
 val NeutralContainer   = Color(0xFFF0F0F0) // Sin estatus / informativo neutro
 val OnNeutralContainer = Color(0xFF616161)
 
+// ─── Seguridad de la Cuenta (Mi perfil), del diseño del portal del SIIA ───────
+val SecurityTeal          = Color(0xFF0F766E) // Botón de actualizar el NIP
+val SecurityBlueContainer = Color(0xFFEFF6FF) // Fondo del ícono de la contraseña
+val OnSecurityBlue        = Color(0xFF2563EB) // Ícono de la contraseña
+val SlateBorder           = Color(0xFFDCE3DD) // Bordes de campos y tarjetas
+val SlateSurface          = Color(0xFFF7F9F8) // Requisitos y campos apagados
+
 // ─── Esquema oscuro ───────────────────────────────────────────────────────────
 // La app fuerza siempre el tema claro; estos valores son solo por completitud de API.
 val GreenPrimaryDark   = Color(0xFF4CAF50)

@@ -1,8 +1,10 @@
 package com.example.appteschi.viewmodel
 
 import com.example.appteschi.data.UserSession
-import com.example.appteschi.service.PerfilAlumno
-import com.example.appteschi.service.PerfilAlumnoApi
+import com.example.appteschi.service.SiiaLoginResultado
+import com.example.appteschi.testutil.FakeFotoPerfilStore
+import com.example.appteschi.testutil.FakeSiiaAuthService
+import com.example.appteschi.testutil.cuentaDePrueba
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -11,58 +13,11 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-
-/** Fake sin red real — el mismo patrón que testutil/AuthFakes.kt. */
-class FakePerfilAlumnoApi(
-    private val resultadoObtener: Result<PerfilAlumno> = Result.failure(IllegalStateException("no configurado")),
-    private val resultadoActualizarCorreo: Result<Unit> = Result.success(Unit),
-    private val resultadoCambiarPassword: Result<Unit> = Result.success(Unit)
-) : PerfilAlumnoApi {
-    var llamadasObtener = 0
-        private set
-    var llamadasActualizarCorreo = 0
-        private set
-    var ultimoCorreoEnviado: String? = null
-        private set
-    var llamadasCambiarPassword = 0
-        private set
-    var ultimaPasswordActualEnviada: String? = null
-        private set
-    var ultimaPasswordNuevaEnviada: String? = null
-        private set
-
-    override suspend fun obtener(matricula: String): Result<PerfilAlumno> {
-        llamadasObtener++
-        return resultadoObtener
-    }
-
-    override suspend fun actualizarCorreo(matricula: String, correoOtp: String): Result<Unit> {
-        llamadasActualizarCorreo++
-        ultimoCorreoEnviado = correoOtp
-        return resultadoActualizarCorreo
-    }
-
-    override suspend fun cambiarPassword(matricula: String, passwordActual: String, passwordNueva: String): Result<Unit> {
-        llamadasCambiarPassword++
-        ultimaPasswordActualEnviada = passwordActual
-        ultimaPasswordNuevaEnviada = passwordNueva
-        return resultadoCambiarPassword
-    }
-}
-
-private fun perfilDeAlumnoDePrueba() = PerfilAlumno(
-    matricula = "2099000001",
-    nombreCompleto = "Alumno de Prueba Uno",
-    correoOtp = null,
-    correoInstitucional = "2099000001@teschi.edu.mx",
-    carrera = "Ingeniería en Sistemas Computacionales",
-    claveCarrera = "ISC",
-    semestre = 9
-)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PerfilAlumnoViewModelTest {
@@ -72,7 +27,7 @@ class PerfilAlumnoViewModelTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(dispatcher)
-        UserSession.establecer(matricula = "2099000001")
+        UserSession.establecer(cuentaDePrueba(), "token-de-prueba", 480)
     }
 
     @After
@@ -82,157 +37,157 @@ class PerfilAlumnoViewModelTest {
     }
 
     @Test
-    fun `arranca cargando y termina con el perfil real del backend`() = runTest {
-        val api = FakePerfilAlumnoApi(resultadoObtener = Result.success(perfilDeAlumnoDePrueba()))
-        val vm = PerfilAlumnoViewModel(api)
+    fun `muestra los datos del SIIA de la sesion`() {
+        val e = PerfilAlumnoViewModel(FakeSiiaAuthService()).uiState.value
+        assertEquals("ALUMNO DE PRUEBA UNO", e.nombreCompleto)
+        assertEquals("2099000001", e.matricula)
+        assertEquals("INGENIERÍA EN SISTEMAS COMPUTACIONALES", e.carrera)
+        assertEquals("a***o@teschi.edu.mx", e.correo)
+    }
 
-        assertTrue(vm.uiState.value.cargando)
+    private val contrasenaCorrecta = SiiaLoginResultado.RequiereNip(tieneNip = true, tempToken = "temporal", cuenta = null)
 
+    @Test
+    fun `cambiar NIP autoriza con la contrasena y manda el token de la sesion`() = runTest {
+        val siia = FakeSiiaAuthService(resultado = contrasenaCorrecta)
+        val vm = PerfilAlumnoViewModel(siia)
+        vm.cambiarNip("secreto", "1234", "5678", "5678")
         dispatcher.scheduler.advanceUntilIdle()
-
-        val estado = vm.uiState.value
-        assertEquals(false, estado.cargando)
-        assertEquals(perfilDeAlumnoDePrueba(), estado.perfil)
-        assertEquals(1, api.llamadasObtener)
+        assertEquals(1, siia.llamadas)
+        assertEquals("token-de-prueba", siia.ultimoTokenCambiar)
+        assertEquals("5678", siia.ultimoNuevoNip)
+        assertEquals("Tu NIP se actualizó.", vm.uiState.value.mensajeNip)
+        assertFalse(vm.uiState.value.cambiandoNip)
     }
 
     @Test
-    fun `si el backend falla, se muestra el error real`() = runTest {
-        val api = FakePerfilAlumnoApi(
-            resultadoObtener = Result.failure(IllegalStateException("No existe un alumno con esa matrícula"))
+    fun `con la contrasena incorrecta no cambia el NIP`() = runTest {
+        val siia = FakeSiiaAuthService(resultado = SiiaLoginResultado.Error("Usuario o password incorrectos."))
+        val vm = PerfilAlumnoViewModel(siia)
+        vm.cambiarNip("mala", "1234", "5678", "5678")
+        dispatcher.scheduler.advanceUntilIdle()
+        assertNull(siia.ultimoTokenCambiar)
+        assertEquals("Usuario o password incorrectos.", vm.uiState.value.errorNip)
+        assertNull(vm.uiState.value.mensajeNip)
+        assertFalse(vm.uiState.value.cambiandoNip)
+    }
+
+    @Test
+    fun `valida los datos antes de llamar al SIIA`() = runTest {
+        val siia = FakeSiiaAuthService(resultado = contrasenaCorrecta)
+        val vm = PerfilAlumnoViewModel(siia)
+
+        vm.cambiarNip(" ", "1234", "5678", "5678")
+        assertEquals("Escribe tu contraseña actual para autorizar el cambio.", vm.uiState.value.errorNip)
+        vm.cambiarNip("secreto", "12", "5678", "5678")
+        assertEquals("Escribe tu NIP actual de 4 dígitos.", vm.uiState.value.errorNip)
+        vm.cambiarNip("secreto", "1234", "56", "56")
+        assertEquals("El nuevo NIP debe tener 4 dígitos.", vm.uiState.value.errorNip)
+        vm.cambiarNip("secreto", "1234", "5678", "8765")
+        assertEquals("Los NIP nuevos no coinciden.", vm.uiState.value.errorNip)
+        vm.cambiarNip("secreto", "1234", "1234", "1234")
+        assertEquals("El nuevo NIP debe ser distinto del actual.", vm.uiState.value.errorNip)
+
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(0, siia.llamadas)
+        assertNull(siia.ultimoTokenCambiar)
+    }
+
+    @Test
+    fun `si el SIIA rechaza el NIP actual se muestra su mensaje`() = runTest {
+        val siia = FakeSiiaAuthService(
+            resultado = contrasenaCorrecta,
+            resultadoCambiar = Result.failure(IllegalStateException("El NIP actual no es correcto."))
         )
-        val vm = PerfilAlumnoViewModel(api)
+        val vm = PerfilAlumnoViewModel(siia)
+        vm.cambiarNip("secreto", "0000", "5678", "5678")
         dispatcher.scheduler.advanceUntilIdle()
-
-        val estado = vm.uiState.value
-        assertNull(estado.perfil)
-        assertEquals("No existe un alumno con esa matrícula", estado.error)
+        assertEquals("El NIP actual no es correcto.", vm.uiState.value.errorNip)
     }
 
     @Test
-    fun `correo con formato invalido rechaza sin llamar al backend`() = runTest {
-        val api = FakePerfilAlumnoApi(resultadoObtener = Result.success(perfilDeAlumnoDePrueba()))
-        val vm = PerfilAlumnoViewModel(api)
-        dispatcher.scheduler.advanceUntilIdle()
-
-        vm.actualizarCorreo("no-es-un-correo")
-
-        assertEquals("Ingresa un correo válido.", vm.uiState.value.errorCorreo)
-        assertEquals(0, api.llamadasActualizarCorreo)
+    fun `empieza mostrando todo y cambia de seccion`() {
+        val vm = PerfilAlumnoViewModel(FakeSiiaAuthService())
+        assertEquals(SeccionSeguridad.TODO, vm.uiState.value.seccion)
+        vm.seleccionarSeccion(SeccionSeguridad.NIP)
+        assertEquals(SeccionSeguridad.NIP, vm.uiState.value.seccion)
     }
 
     @Test
-    fun `actualizar correo exitoso refleja el nuevo correo en el perfil`() = runTest {
-        val api = FakePerfilAlumnoApi(resultadoObtener = Result.success(perfilDeAlumnoDePrueba()))
-        val vm = PerfilAlumnoViewModel(api)
-        dispatcher.scheduler.advanceUntilIdle()
-
-        vm.actualizarCorreo("alumno@example.com")
-        dispatcher.scheduler.advanceUntilIdle()
-
-        val estado = vm.uiState.value
-        assertTrue(estado.correoActualizado)
-        assertEquals("alumno@example.com", estado.perfil?.correoOtp)
-        assertEquals("alumno@example.com", api.ultimoCorreoEnviado)
+    fun `sin foto guardada muestra el icono`() {
+        assertNull(PerfilAlumnoViewModel(FakeSiiaAuthService(), FakeFotoPerfilStore()).uiState.value.fotoRuta)
     }
 
     @Test
-    fun `actualizar correo fallido muestra el error real y no toca el perfil`() = runTest {
-        val api = FakePerfilAlumnoApi(
-            resultadoObtener = Result.success(perfilDeAlumnoDePrueba()),
-            resultadoActualizarCorreo = Result.failure(IllegalStateException("No se pudo actualizar tu correo"))
-        )
-        val vm = PerfilAlumnoViewModel(api)
-        dispatcher.scheduler.advanceUntilIdle()
+    fun `muestra la foto guardada de esta cuenta y no la de otra`() {
+        val propia = FakeFotoPerfilStore(mutableMapOf("2099000001" to "/fotos/mia.jpg"))
+        assertEquals("/fotos/mia.jpg", PerfilAlumnoViewModel(FakeSiiaAuthService(), propia).uiState.value.fotoRuta)
 
-        vm.actualizarCorreo("alumno@example.com")
-        dispatcher.scheduler.advanceUntilIdle()
-
-        val estado = vm.uiState.value
-        assertEquals("No se pudo actualizar tu correo", estado.errorCorreo)
-        assertNull(estado.perfil?.correoOtp)
+        val ajena = FakeFotoPerfilStore(mutableMapOf("2099000002" to "/fotos/otra.jpg"))
+        assertNull(PerfilAlumnoViewModel(FakeSiiaAuthService(), ajena).uiState.value.fotoRuta)
     }
 
     @Test
-    fun `password actual en blanco rechaza sin llamar al backend`() = runTest {
-        val api = FakePerfilAlumnoApi(resultadoObtener = Result.success(perfilDeAlumnoDePrueba()))
-        val vm = PerfilAlumnoViewModel(api)
+    fun `cambiar la foto la guarda en la cuenta y avisa que hay una nueva`() = runTest {
+        val fotos = FakeFotoPerfilStore()
+        val vm = PerfilAlumnoViewModel(FakeSiiaAuthService(), fotos)
+        vm.cambiarFoto { null }
+        assertTrue(vm.uiState.value.guardandoFoto)
         dispatcher.scheduler.advanceUntilIdle()
 
-        vm.cambiarPassword("", "ClaveNueva1", "ClaveNueva1")
-
-        assertEquals("Ingresa tu contraseña actual.", vm.uiState.value.errorPassword)
-        assertEquals(0, api.llamadasCambiarPassword)
+        val e = vm.uiState.value
+        assertEquals("/fotos/nueva.jpg", e.fotoRuta)
+        assertEquals(1, e.fotoVersion)
+        assertFalse(e.guardandoFoto)
+        assertNull(e.errorFoto)
+        assertEquals("/fotos/nueva.jpg", fotos.ruta("2099000001"))
     }
 
     @Test
-    fun `passwords nuevas que no coinciden rechazan sin llamar al backend`() = runTest {
-        val api = FakePerfilAlumnoApi(resultadoObtener = Result.success(perfilDeAlumnoDePrueba()))
-        val vm = PerfilAlumnoViewModel(api)
+    fun `no guarda dos fotos a la vez`() = runTest {
+        val fotos = FakeFotoPerfilStore()
+        val vm = PerfilAlumnoViewModel(FakeSiiaAuthService(), fotos)
+        vm.cambiarFoto { null }
+        vm.cambiarFoto { null }
         dispatcher.scheduler.advanceUntilIdle()
-
-        vm.cambiarPassword("ClaveVieja1", "ClaveNueva1", "OtraClave2")
-
-        assertEquals("Las contraseñas nuevas no coinciden.", vm.uiState.value.errorPassword)
-        assertEquals(0, api.llamadasCambiarPassword)
+        assertEquals(1, fotos.guardadas)
     }
 
     @Test
-    fun `password nueva debil rechaza sin llamar al backend`() = runTest {
-        val api = FakePerfilAlumnoApi(resultadoObtener = Result.success(perfilDeAlumnoDePrueba()))
-        val vm = PerfilAlumnoViewModel(api)
+    fun `una imagen que no sirve avisa y conserva la foto anterior`() = runTest {
+        val fotos = FakeFotoPerfilStore(mutableMapOf("2099000001" to "/fotos/mia.jpg"), resultadoGuardar = null)
+        val vm = PerfilAlumnoViewModel(FakeSiiaAuthService(), fotos)
+        vm.cambiarFoto { null }
         dispatcher.scheduler.advanceUntilIdle()
 
-        vm.cambiarPassword("ClaveVieja1", "debil", "debil")
+        assertEquals(MENSAJE_FOTO_NO_VALIDA, vm.uiState.value.errorFoto)
+        assertEquals("/fotos/mia.jpg", vm.uiState.value.fotoRuta)
+        assertFalse(vm.uiState.value.guardandoFoto)
 
-        assertEquals(
-            "La contraseña requiere mínimo 8 caracteres, una mayúscula, una minúscula y un número.",
-            vm.uiState.value.errorPassword
-        )
-        assertEquals(0, api.llamadasCambiarPassword)
+        vm.errorFotoMostrado()
+        assertNull(vm.uiState.value.errorFoto)
     }
 
     @Test
-    fun `cambiar password exitoso marca passwordCambiada`() = runTest {
-        val api = FakePerfilAlumnoApi(resultadoObtener = Result.success(perfilDeAlumnoDePrueba()))
-        val vm = PerfilAlumnoViewModel(api)
+    fun `quitar la foto la borra`() = runTest {
+        val fotos = FakeFotoPerfilStore(mutableMapOf("2099000001" to "/fotos/mia.jpg"))
+        val vm = PerfilAlumnoViewModel(FakeSiiaAuthService(), fotos)
+        vm.quitarFoto()
         dispatcher.scheduler.advanceUntilIdle()
-
-        vm.cambiarPassword("ClaveVieja1", "ClaveNueva1", "ClaveNueva1")
-        dispatcher.scheduler.advanceUntilIdle()
-
-        val estado = vm.uiState.value
-        assertTrue(estado.passwordCambiada)
-        assertEquals("ClaveVieja1", api.ultimaPasswordActualEnviada)
-        assertEquals("ClaveNueva1", api.ultimaPasswordNuevaEnviada)
+        assertNull(vm.uiState.value.fotoRuta)
+        assertNull(fotos.ruta("2099000001"))
     }
 
     @Test
-    fun `cambiar password con actual incorrecta muestra el error real del backend`() = runTest {
-        val api = FakePerfilAlumnoApi(
-            resultadoObtener = Result.success(perfilDeAlumnoDePrueba()),
-            resultadoCambiarPassword = Result.failure(IllegalStateException("La contraseña actual es incorrecta"))
-        )
-        val vm = PerfilAlumnoViewModel(api)
-        dispatcher.scheduler.advanceUntilIdle()
-
-        vm.cambiarPassword("ClaveIncorrecta1", "ClaveNueva1", "ClaveNueva1")
-        dispatcher.scheduler.advanceUntilIdle()
-
-        val estado = vm.uiState.value
-        assertEquals(false, estado.passwordCambiada)
-        assertEquals("La contraseña actual es incorrecta", estado.errorPassword)
+    fun `cerrar sesion no borra la foto de la cuenta`() {
+        val fotos = FakeFotoPerfilStore(mutableMapOf("2099000001" to "/fotos/mia.jpg"))
+        PerfilAlumnoViewModel(FakeSiiaAuthService(), fotos).cerrarSesion()
+        assertEquals("/fotos/mia.jpg", fotos.ruta("2099000001"))
     }
 
     @Test
-    fun `cargar vuelve a consultar el backend`() = runTest {
-        val api = FakePerfilAlumnoApi(resultadoObtener = Result.success(perfilDeAlumnoDePrueba()))
-        val vm = PerfilAlumnoViewModel(api)
-        dispatcher.scheduler.advanceUntilIdle()
-
-        vm.cargar()
-        dispatcher.scheduler.advanceUntilIdle()
-
-        assertEquals(2, api.llamadasObtener)
+    fun `cerrar sesion borra el token`() {
+        PerfilAlumnoViewModel(FakeSiiaAuthService()).cerrarSesion()
+        assertNull(UserSession.token)
     }
 }

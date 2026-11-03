@@ -1,16 +1,18 @@
 # Diagrama de Componentes — AppTESCHI
 
-> Cómo se dividen las responsabilidades dentro de cada aplicación y cómo se comunican entre sí.
+> ⚠️ **Desactualizado (12/10/2026, DEC-043):** describe el sistema con backend propio, base de datos y panel de administrador. Hoy la app solo tiene las pantallas del alumno con datos del SIIA (ver [[REGLAS_PROYECTO]] y [[MAPA_PROYECTO]]). Actualizar antes de entregarlo.
+
+> Cómo se dividen las responsabilidades dentro de cada aplicación y cómo se comunican entre sí. Actualizado 27/09/2026.
 > **Relacionado con:** [[05_Diagrama_Despliegue]], [[03_Diagramas_Secuencia]], [[REGLAS_PROYECTO]]
 
 ```mermaid
 flowchart TB
     subgraph Android["App Android — Kotlin + Jetpack Compose (MVVM)"]
         direction TB
-        UI["Capa UI<br/>Composables — LoginScreen, DashboardScreen,<br/>AdminAlumnosScreen, AdminCalificacionesScreen,<br/>AdminAuditoriaScreen, AdminEstadisticasScreen, AdminProfileScreen"]
-        VM["Capa ViewModel<br/>AuthViewModel, ReinscripcionViewModel,<br/>TiraMateriasViewModel, KardexViewModel,<br/>CalificacionesViewModel (mock)"]
-        SVC["Capa Servicio / Repositorio<br/>AdminUsersService, CalificacionesAdminService,<br/>AdminAuditService, EstadisticasService,<br/>PlanEstudiosService, AuthRepository,<br/>LocalAccountAuthService, SiiaAuthService, EmailOtpService"]
-        LOCAL["Datos locales<br/>UserSession, AuditTrail, HistorialAcademico.kt (mock),<br/>SharedPreferences"]
+        UI["Capa UI<br/>Composables — LoginScreen, DashboardScreen + BottomNavBar,<br/>Reinscripcion/TiraMaterias/Calificaciones/Kardex/PerfilAlumno,<br/>Admin*Screen (alumnos, calificaciones, auditoría, estadísticas,<br/>administradores, reinscripciones, horarios)"]
+        VM["Capa ViewModel<br/>AuthViewModel, InicioViewModel, ReinscripcionViewModel,<br/>TiraMateriasViewModel, CalificacionesViewModel, KardexViewModel,<br/>PerfilAlumnoViewModel, RegistroViewModel, RecuperarPasswordViewModel"]
+        SVC["Capa Servicio / Repositorio (sobre ClienteHttp)<br/>AuthRepository, LocalAccountAuthService, AdminAccountAuthService,<br/>SiiaAuthService, OtpService, PerfilAlumnoService, HistorialAcademicoService,<br/>HorarioService, ReinscripcionService, Admin*Service, EstadisticasService"]
+        LOCAL["Datos locales<br/>UserSession (token de sesión), AuditTrail,<br/>SharedPreferences"]
         UI --> VM
         UI -.->|pantallas admin sin ViewModel, llaman servicio directo| SVC
         VM --> SVC
@@ -20,34 +22,38 @@ flowchart TB
 
     subgraph Backend["AppTeschi.Api — Node.js + Express"]
         direction TB
-        ROUTES["Rutas REST<br/>/api/registro, /api/auth/cuenta,<br/>/api/usuarios (+CRUD), /api/calificaciones,<br/>/api/auditoria, /api/estadisticas,<br/>/api/plan-estudios, /api/grupos, /api/catalogos"]
-        AUTH["Validación<br/>hasValidApiKey(), hashPassword()/verifyPassword() (scrypt)"]
+        ROUTES["Rutas REST<br/>/api/auth/cuenta|administrador|siia, /api/otp/*,<br/>/api/mi-*, /api/reinscripcion/*, /api/registro,<br/>/api/usuarios (+CRUD), /api/calificaciones, /api/horarios,<br/>/api/auditoria, /api/estadisticas, /api/administradores,<br/>/api/plan-estudios, /api/grupos, /api/catalogos"]
+        AUTH["Validación<br/>requireAlumno()/requireAdmin() (JWT), tickets de login,<br/>hashPassword()/verifyPassword() (scrypt), excedeLimite()"]
+        EXT["Integraciones<br/>loginSiiaReal() · correo-graph.js"]
         AUDIT["writeAudit(...)<br/>registra cada movimiento administrativo"]
         POOL["Pool de conexiones<br/>mssql / tedious"]
         ROUTES --> AUTH
         ROUTES --> AUDIT
+        ROUTES --> EXT
         ROUTES --> POOL
         AUDIT --> POOL
     end
 
-    subgraph DB["SQL Server Express — AppTeschiDB"]
+    subgraph DB["SQL Server 2022 Express — AppTeschiDB"]
         direction TB
-        IDENT["Identidad<br/>Alumnos, AlumnoCredenciales"]
+        IDENT["Identidad<br/>Alumnos, AlumnoCredenciales,<br/>Administradores, AdministradorCredenciales"]
         CAT["Catálogos<br/>CatalogoCarreras, CatalogoSistemas,<br/>CatalogoPeriodos, CatalogoTurnos, CatalogoEstatusMateria"]
-        ACAD["Dominio académico<br/>PlanEstudioMaterias, Grupos, HistorialAcademico"]
+        ACAD["Dominio académico<br/>PlanEstudioMaterias, Grupos, HistorialAcademico,<br/>Horarios, SolicitudesReinscripcion"]
         AUD["Auditoría<br/>AuditoriaMovimientos"]
         SESSION["Sesión / OTP<br/>OtpHistorial, SesionesLogin"]
     end
 
     subgraph Externos["Sistemas externos"]
         direction TB
-        SIIA["SIIA institucional<br/>ASP.NET Web Forms (scraping)"]
-        SMTP["Servidor SMTP<br/>envío de OTP por correo"]
+        SIIA["API oficial del SIIA<br/>POST /login.ashx"]
+        GRAPH["Microsoft Graph<br/>correo institucional (OTP)"]
+        SMTP["SMTP Gmail<br/>respaldo"]
     end
 
-    SVC -->|HTTPS + x-api-key<br/>vía túnel Cloudflare| ROUTES
-    SVC -->|scraping OkHttp + Jsoup| SIIA
-    SVC -->|SMTP| SMTP
+    SVC -->|HTTP + Bearer token<br/>LAN / Tailscale| ROUTES
+    EXT -->|HTTPS| SIIA
+    EXT -->|HTTPS| GRAPH
+    EXT -.->|SMTP| SMTP
     POOL --> IDENT
     POOL --> CAT
     POOL --> ACAD

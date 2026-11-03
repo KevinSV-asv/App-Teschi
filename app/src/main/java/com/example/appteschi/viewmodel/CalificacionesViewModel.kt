@@ -2,38 +2,41 @@ package com.example.appteschi.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.appteschi.data.MateriaHistorial
-import com.example.appteschi.service.HistorialAcademicoApi
-import com.example.appteschi.service.HistorialAcademicoService
-import com.example.appteschi.service.historialDelAlumnoEnSesion
+import com.example.appteschi.service.CalificacionesFinales
+import com.example.appteschi.service.CalificacionesParciales
+import com.example.appteschi.service.CalificacionesSiiaApi
+import com.example.appteschi.service.CalificacionesSiiaService
+import com.example.appteschi.service.ResultadoFinales
+import com.example.appteschi.service.ResultadoParciales
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+enum class VistaCalificaciones { PARCIALES, FINALES }
+
 data class CalificacionesUiState(
+    val vista: VistaCalificaciones = VistaCalificaciones.PARCIALES,
     val cargando: Boolean = true,
-    val semestreActual: Int = 0,
-    val promedioGeneral: Double = 0.0,
-    val materias: List<MateriaHistorial> = emptyList(),
-    val error: String? = null
+    val error: String? = null,
+    val parciales: CalificacionesParciales? = null,
+    /** Error al cambiar de periodo: se muestra sobre las parciales que ya se veían, en vez de ocultarlas. */
+    val errorPeriodo: String? = null,
+    val cargandoFinales: Boolean = false,
+    val errorFinales: String? = null,
+    val finales: CalificacionesFinales? = null,
+    /** Igual que [errorPeriodo], para las finales. */
+    val errorPeriodoFinales: String? = null
 )
 
 /**
- * Muestra únicamente las materias del semestre en el que el alumno está
- * inscrito actualmente, tomadas del historial académico real (mismo dato
- * que usa Kardex — ver HistorialAcademicoService.historialDelAlumnoEnSesion,
- * nunca una copia aparte). Las materias sin calificación todavía (el
- * docente no la ha subido) se incluyen igual, con calificacion = null, para
- * que la pantalla las muestre como "Pendiente".
- *
- * El portal real del SIIA separa Calificaciones Parciales/Finales — no
- * tenemos datos de parciales todavía, solo la calificación final que ya
- * trae el Kardex (pendiente documentado, no alcance de este cambio).
+ * Calificaciones del SIIA por periodo: parciales 1–3 (DEC-042) y finales con
+ * 1ra y 2da vuelta (DEC-044). Las finales se piden hasta que el alumno abre esa
+ * vista, y el periodo elegido se conserva al cambiar de una a otra.
  */
 class CalificacionesViewModel(
-    private val historialService: HistorialAcademicoApi = HistorialAcademicoService
+    private val siiaService: CalificacionesSiiaApi = CalificacionesSiiaService
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CalificacionesUiState())
@@ -43,34 +46,77 @@ class CalificacionesViewModel(
         cargar()
     }
 
-    fun reintentar() = cargar()
+    fun reintentar() = when (_uiState.value.vista) {
+        VistaCalificaciones.PARCIALES -> cargar(_uiState.value.parciales?.periodo)
+        VistaCalificaciones.FINALES -> cargarFinales(_uiState.value.finales?.periodo ?: periodoParciales())
+    }
 
-    private fun cargar() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(cargando = true, error = null) }
-            historialDelAlumnoEnSesion(historialService).fold(
-                onSuccess = { info ->
-                    val delSemestre = info.materias.filter { it.semestre == info.semestre }
-                    _uiState.update {
-                        it.copy(
-                            cargando = false,
-                            semestreActual = info.semestre,
-                            promedioGeneral = promedio(delSemestre),
-                            materias = delSemestre
-                        )
-                    }
-                },
-                onFailure = { error ->
-                    _uiState.update {
-                        it.copy(cargando = false, error = error.message ?: "No se pudieron consultar tus calificaciones.")
-                    }
-                }
-            )
+    fun seleccionarVista(vista: VistaCalificaciones) {
+        val e = _uiState.value
+        if (vista == e.vista) return
+        _uiState.update { it.copy(vista = vista) }
+        when (vista) {
+            VistaCalificaciones.FINALES -> {
+                val periodo = periodoParciales()
+                if (e.finales == null || (periodo != null && periodo != e.finales.periodo)) cargarFinales(periodo)
+            }
+            VistaCalificaciones.PARCIALES -> {
+                val periodo = e.finales?.periodo?.takeIf { it.isNotBlank() }
+                if (e.parciales == null && !e.cargando) cargar(periodo)
+                else if (e.parciales != null && periodo != null && periodo != e.parciales.periodo) cargar(periodo)
+            }
         }
     }
 
-    private fun promedio(materias: List<MateriaHistorial>): Double {
-        val calificaciones = materias.mapNotNull { it.calificacion }
-        return if (calificaciones.isEmpty()) 0.0 else calificaciones.average()
+    fun seleccionarPeriodo(periodo: String) {
+        val e = _uiState.value
+        when (e.vista) {
+            VistaCalificaciones.PARCIALES ->
+                if (periodo != e.parciales?.periodo) cargar(periodo)
+                else _uiState.update { it.copy(errorPeriodo = null) }
+            VistaCalificaciones.FINALES ->
+                if (periodo != e.finales?.periodo) cargarFinales(periodo)
+                else _uiState.update { it.copy(errorPeriodoFinales = null) }
+        }
+    }
+
+    private fun periodoParciales(): String? = _uiState.value.parciales?.periodo?.takeIf { it.isNotBlank() }
+
+    private fun cargar(periodo: String? = null) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(cargando = true, error = null, errorPeriodo = null) }
+            when (val r = siiaService.parciales(periodo)) {
+                is ResultadoParciales.Datos -> _uiState.update { it.copy(cargando = false, parciales = r.calificaciones) }
+                is ResultadoParciales.Error -> {
+                    val anteriores = _uiState.value.parciales
+                    _uiState.update {
+                        if (periodo != null && anteriores != null) {
+                            it.copy(cargando = false, errorPeriodo = "No se pudo cargar el periodo $periodo. ${r.mensaje}")
+                        } else {
+                            it.copy(cargando = false, error = r.mensaje)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun cargarFinales(periodo: String?) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(cargandoFinales = true, errorFinales = null, errorPeriodoFinales = null) }
+            when (val r = siiaService.finales(periodo)) {
+                is ResultadoFinales.Datos -> _uiState.update { it.copy(cargandoFinales = false, finales = r.calificaciones) }
+                is ResultadoFinales.Error -> {
+                    val anteriores = _uiState.value.finales
+                    _uiState.update {
+                        if (periodo != null && anteriores != null) {
+                            it.copy(cargandoFinales = false, errorPeriodoFinales = "No se pudo cargar el periodo $periodo. ${r.mensaje}")
+                        } else {
+                            it.copy(cargandoFinales = false, errorFinales = r.mensaje)
+                        }
+                    }
+                }
+            }
+        }
     }
 }

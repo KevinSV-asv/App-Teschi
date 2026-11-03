@@ -1,6 +1,8 @@
 # Diagrama de Despliegue — AppTESCHI
 
-> Topología física actual (actualizada 19/09/2026, DEC-031): el backend y la base de datos corren en un **servidor Ubuntu en casa**, accesible solo por LAN y Tailscale. La laptop es entorno de desarrollo. Aún no hay despliegue institucional ni acceso público — ver [[03_Manual_Tecnico_Instalacion]] §8.
+> ⚠️ **Desactualizado (12/10/2026, DEC-043):** describe el sistema con backend propio, base de datos y panel de administrador. Hoy la app solo tiene las pantallas del alumno con datos del SIIA (ver [[REGLAS_PROYECTO]] y [[MAPA_PROYECTO]]). Actualizar antes de entregarlo.
+
+> Topología física actual (actualizada 27/09/2026; servidor desde DEC-031): el backend y la base de datos corren en un **servidor Ubuntu en casa**, accesible solo por LAN y Tailscale. La laptop es entorno de desarrollo. Aún no hay despliegue institucional ni acceso público — ver [[03_Manual_Tecnico_Instalacion]] §8.
 > **Relacionado con:** [[04_Diagrama_Componentes]], [[03_Manual_Tecnico_Instalacion]], [[DECISIONES_TECNICAS]]
 
 ```mermaid
@@ -27,14 +29,18 @@ flowchart TB
     end
 
     subgraph Nube["☁️ Servicios externos"]
-        SMTP["Gmail SMTP<br/>envío de OTP"]
+        SIIA["API oficial del SIIA<br/>siia.teschi.edu.mx (HTTPS)<br/>solo login.ashx"]
+        GRAPH["Microsoft Graph<br/>correo institucional del OTP"]
+        SMTP["Gmail SMTP<br/>respaldo del correo"]
         TS["Tailscale<br/>(acceso fuera de casa)"]
     end
 
     APK -->|HTTP por LAN<br/>Bearer token de sesión| API
     APK -.->|fuera de casa<br/>vía Tailscale| TS
     TS -.-> API
-    API -->|SMTP 587| SMTP
+    API -->|HTTPS 443<br/>valida contraseña| SIIA
+    API -->|HTTPS 443<br/>sendMail| GRAPH
+    API -.->|SMTP 587<br/>solo si faltan MS_*| SMTP
     Laptop -->|deploy-desde-windows.ps1<br/>scp + ssh| Servidor
 ```
 
@@ -43,8 +49,8 @@ flowchart TB
 - **No hay acceso desde internet.** El router no redirige puertos: solo se llega al puerto 4000 desde la LAN (`192.168.0.x`) o desde la red Tailscale (teléfono con la app de Tailscale). `ufw` está inactivo a propósito (DEC-031).
 - **SQL Server no sale del servidor:** el contenedor publica `127.0.0.1:1433`, nadie más lo ve. La API usa el login `appteschi_api` (`db_owner` solo en `AppTeschiDB`), no `sa`.
 - **SQL Server va en Docker** porque Microsoft solo documenta soporte nativo hasta Ubuntu 24.04.
-- **El teléfono nunca toca SQL Server:** todo pasa por la API. Ya no existe ninguna comunicación con el SIIA (DEC-026).
-- **Autenticación:** contraseña → ticket de 10 min → OTP por correo → token de sesión propio (alumno o administrador). Ya no hay `x-api-key` (DEC-030).
+- **El teléfono nunca toca SQL Server ni el SIIA:** todo pasa por la API. El servidor llama a la API oficial del SIIA solo para validar contraseñas (DEC-035).
+- **Autenticación:** contraseña (propia o del SIIA) → ticket de 10 min → OTP por correo institucional → token de sesión propio (alumno o administrador). Ya no hay `x-api-key` (DEC-030).
 - **Despliegue:** desde la laptop con `deploy-desde-windows.ps1` (sube el código y reinicia el servicio). La laptop conserva su propia base local para desarrollo; **no está sincronizada** con la del servidor.
 - Los respaldos viven en el mismo disco que la base: falta una copia fuera del servidor.
 

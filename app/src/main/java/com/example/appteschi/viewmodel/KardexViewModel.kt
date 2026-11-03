@@ -2,48 +2,47 @@ package com.example.appteschi.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.appteschi.data.EstatusMateria
-import com.example.appteschi.data.MateriaHistorial
-import com.example.appteschi.service.HistorialAcademicoApi
-import com.example.appteschi.service.HistorialAcademicoService
-import com.example.appteschi.service.historialDelAlumnoEnSesion
+import com.example.appteschi.service.Kardex
+import com.example.appteschi.service.KardexPdf
+import com.example.appteschi.service.KardexSiiaApi
+import com.example.appteschi.service.KardexSiiaService
+import com.example.appteschi.service.ResultadoKardex
+import com.example.appteschi.service.ResultadoKardexPdf
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.IOException
+import java.io.OutputStream
 
 data class KardexUiState(
     val cargando: Boolean = true,
-    val carrera: String = "",
-    val periodoIngreso: String = "",
-    val ultimoPeriodo: String = "",
-    val promedioGlobal: Double = 0.0,
-    val promedioUltimoSemestre: Double = 0.0,
-    val totalCreditosCarrera: Int = 0,
-    val totalCreditosCursados: Int = 0,
-    val porcentajeCubierto: Double = 0.0,
-    val totalMaterias: Int = 0,
-    val materiasAprobadas: Int = 0,
-    val materiasReprobadas: Int = 0,
-    val materiasPorAprobar: Int = 0,
-    val materias: List<MateriaHistorial> = emptyList(),
-    val error: String? = null
+    val error: String? = null,
+    val kardex: Kardex? = null,
+    /** Semestre elegido en el filtro; null = todos. */
+    val semestreFiltro: Int? = null,
+    val descargandoPdf: Boolean = false,
+    /** Nombre propuesto cuando el PDF ya llegó y falta que el alumno elija dónde guardarlo. */
+    val pedirDestinoPdf: String? = null,
+    val pdfGuardado: Boolean = false,
+    val errorPdf: String? = null
 )
 
-/**
- * Muestra el historial académico real del alumno (Kardex/Tira de
- * Materias/Calificaciones comparten la misma fuente — ver
- * HistorialAcademicoService.historialDelAlumnoEnSesion) — este ViewModel no
- * guarda su propia copia, solo calcula los totales de resumen a partir de
- * esa lista.
- */
+/** Kardex del SIIA (DEC-044): historial completo y descarga del PDF oficial. */
 class KardexViewModel(
-    private val historialService: HistorialAcademicoApi = HistorialAcademicoService
+    private val siia: KardexSiiaApi = KardexSiiaService,
+    private val io: CoroutineDispatcher = Dispatchers.IO
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(KardexUiState())
     val uiState: StateFlow<KardexUiState> = _uiState.asStateFlow()
+
+    // Fuera del estado para no compararlo ni conservarlo más de lo necesario.
+    private var pdfPendiente: KardexPdf? = null
 
     init {
         cargar()
@@ -51,50 +50,66 @@ class KardexViewModel(
 
     fun reintentar() = cargar()
 
+    fun filtrarSemestre(numero: Int?) = _uiState.update { it.copy(semestreFiltro = numero) }
+
     private fun cargar() {
         viewModelScope.launch {
             _uiState.update { it.copy(cargando = true, error = null) }
-            historialDelAlumnoEnSesion(historialService).fold(
-                onSuccess = { info ->
-                    val materias = info.materias
-                    _uiState.update {
-                        it.copy(
-                            cargando = false,
-                            carrera = info.carrera,
-                            periodoIngreso = "2022-2",
-                            ultimoPeriodo = "2026-1",
-                            promedioGlobal = promedioAprobadas(materias),
-                            promedioUltimoSemestre = promedioAprobadas(materias.filter { m -> m.semestre == info.semestre - 1 }),
-                            totalCreditosCarrera = materias.sumOf { m -> m.creditos },
-                            totalCreditosCursados = materias
-                                .filter { m -> m.estatus == EstatusMateria.APROBADA }
-                                .sumOf { m -> m.creditos },
-                            porcentajeCubierto = porcentajeCubierto(materias),
-                            totalMaterias = materias.size,
-                            materiasAprobadas = materias.count { m -> m.estatus == EstatusMateria.APROBADA },
-                            materiasReprobadas = materias.count { m -> m.estatus == EstatusMateria.NO_APROBADA },
-                            materiasPorAprobar = materias.count { m -> m.estatus == EstatusMateria.POR_CURSAR },
-                            materias = materias
-                        )
-                    }
-                },
-                onFailure = { error ->
-                    _uiState.update {
-                        it.copy(cargando = false, error = error.message ?: "No se pudo consultar tu historial académico.")
-                    }
-                }
-            )
+            when (val r = siia.kardex()) {
+                is ResultadoKardex.Datos -> _uiState.update { it.copy(cargando = false, kardex = r.kardex) }
+                is ResultadoKardex.Error -> _uiState.update { it.copy(cargando = false, error = r.mensaje) }
+            }
         }
     }
 
-    private fun promedioAprobadas(materias: List<MateriaHistorial>): Double {
-        val calificaciones = materias.mapNotNull { it.calificacion }
-        return if (calificaciones.isEmpty()) 0.0 else calificaciones.average()
+    fun descargarPdf() {
+        if (_uiState.value.descargandoPdf) return
+        _uiState.update { it.copy(descargandoPdf = true, errorPdf = null, pdfGuardado = false) }
+        viewModelScope.launch {
+            when (val r = siia.kardexPdf()) {
+                is ResultadoKardexPdf.Archivo -> {
+                    pdfPendiente = r.pdf
+                    _uiState.update { it.copy(pedirDestinoPdf = r.pdf.nombreArchivo) }
+                }
+                is ResultadoKardexPdf.Error -> _uiState.update { it.copy(descargandoPdf = false, errorPdf = r.mensaje) }
+            }
+        }
     }
 
-    private fun porcentajeCubierto(materias: List<MateriaHistorial>): Double {
-        val total = materias.sumOf { it.creditos }
-        val cursados = materias.filter { it.estatus == EstatusMateria.APROBADA }.sumOf { it.creditos }
-        return if (total == 0) 0.0 else (cursados.toDouble() / total) * 100
+    /** La pantalla ya abrió el selector de archivo: evita abrirlo otra vez si se recrea (p. ej. al girar el teléfono). */
+    fun destinoPedido() = _uiState.update { it.copy(pedirDestinoPdf = null) }
+
+    /** El alumno canceló el selector, o no se pudo abrir ([error] dice por qué). */
+    fun cancelarGuardado(error: String? = null) {
+        pdfPendiente = null
+        _uiState.update { it.copy(descargandoPdf = false, pedirDestinoPdf = null, errorPdf = error) }
     }
+
+    /** Escribe el PDF donde eligió el alumno; [destino] null = no se pudo abrir ese lugar. */
+    fun guardarPdf(destino: OutputStream?) {
+        val pdf = pdfPendiente
+        pdfPendiente = null
+        if (pdf == null || destino == null) {
+            _uiState.update { it.copy(descargandoPdf = false, errorPdf = MENSAJE_PDF_NO_GUARDADO) }
+            return
+        }
+        viewModelScope.launch {
+            val guardado = withContext(io) {
+                try {
+                    destino.use { it.write(pdf.contenido) }
+                    true
+                } catch (_: IOException) {
+                    false
+                }
+            }
+            _uiState.update {
+                it.copy(descargandoPdf = false, pdfGuardado = guardado, errorPdf = if (guardado) null else MENSAJE_PDF_NO_GUARDADO)
+            }
+        }
+    }
+
+    /** La pantalla ya mostró el resultado de la descarga. */
+    fun avisoPdfMostrado() = _uiState.update { it.copy(pdfGuardado = false, errorPdf = null) }
 }
+
+internal const val MENSAJE_PDF_NO_GUARDADO = "No se pudo guardar el PDF en ese lugar. Intenta de nuevo."

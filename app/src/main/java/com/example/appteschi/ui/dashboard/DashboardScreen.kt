@@ -1,5 +1,6 @@
 package com.example.appteschi.ui.dashboard
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -7,12 +8,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.EventAvailable
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Room
-import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -22,31 +19,28 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import com.example.appteschi.R
 import com.example.appteschi.Routes
-import com.example.appteschi.data.EstatusReinscripcion
-import com.example.appteschi.service.ClaseHoy
-import com.example.appteschi.service.EstadoClase
 import com.example.appteschi.ui.theme.BackgroundLight
 import com.example.appteschi.ui.theme.GreenPrimary
-import com.example.appteschi.ui.theme.GreenSecondary
 import com.example.appteschi.ui.theme.LoginGreenBright
 import com.example.appteschi.ui.theme.OnPrimaryWhite
 import com.example.appteschi.ui.theme.TextMuted
 import com.example.appteschi.viewmodel.InicioUiState
 import com.example.appteschi.viewmodel.InicioViewModel
 import com.example.appteschi.ui.theme.ErrorRed
-import com.example.appteschi.ui.theme.SuccessContainer
+import com.example.appteschi.ui.theme.LoginInk
 
 /**
- * Tab "Inicio" — pantalla general de bienvenida: quién eres, tu estatus real
- * y tu horario de hoy. Los módulos (Reinscripción, Tira de Materias,
- * Calificaciones, Intersemestral, Kardex) ya no viven aquí como tarjetas: son
- * destinos de [BottomNavBar], siempre visible.
+ * Tab "Inicio" — bienvenida con los datos del SIIA y el resumen del periodo
+ * actual. Los módulos (Tira de Materias, Calificaciones, Reinscripción,
+ * Kardex) son destinos de [BottomNavBar], siempre visible.
  */
 @Composable
 fun DashboardScreen(navController: NavController, viewModel: InicioViewModel = viewModel()) {
@@ -65,7 +59,17 @@ fun DashboardScreen(navController: NavController, viewModel: InicioViewModel = v
 
             HeroInicio(uiState)
 
-            MateriasYHorarioHoy(uiState, onReintentar = viewModel::cargar)
+            ResumenPeriodo(
+                uiState,
+                onReintentar = viewModel::cargar,
+                onVerCalificaciones = {
+                    navController.navigate(Routes.CALIFICACIONES) {
+                        popUpTo(Routes.DASHBOARD) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                }
+            )
 
             Spacer(modifier = Modifier.height(100.dp))
         }
@@ -87,16 +91,12 @@ private fun DashboardHeader(onIrAPerfil: () -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(GreenPrimary),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.School, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
-                }
-                Spacer(modifier = Modifier.width(8.dp))
+                Image(
+                    painter = painterResource(R.drawable.logo_appteschi),
+                    contentDescription = "Logo TESCHI",
+                    modifier = Modifier.size(42.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(text = "TESChi", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = GreenPrimary)
             }
 
@@ -137,9 +137,8 @@ private fun HeroInicio(uiState: InicioUiState) {
     ) {
         Column {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (uiState.estatus != null) EtiquetaEstatus(uiState.estatus)
-                if (uiState.semestre != null) Etiqueta("${uiState.semestre}° Semestre")
-                if (uiState.claveCarrera != null) Etiqueta(uiState.claveCarrera)
+                Etiqueta("Alumno")
+                if (uiState.periodo.isNotBlank()) Etiqueta("Periodo ${uiState.periodo}")
             }
             Spacer(modifier = Modifier.height(10.dp))
             Text(
@@ -150,10 +149,10 @@ private fun HeroInicio(uiState: InicioUiState) {
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = if (uiState.semestre != null && uiState.carrera != null) {
-                    "Estás en tu ${uiState.semestre}° semestre. ¡Sigue así, la meta en ${uiState.carrera} está cada vez más cerca!"
+                text = if (uiState.carrera.isNotBlank()) {
+                    "${uiState.carrera.lowercase().replaceFirstChar { it.uppercase() }}. Aquí ves tus calificaciones, tus materias y tu kardex del SIIA."
                 } else {
-                    "Aquí podrás gestionar y dar seguimiento a tus trámites escolares: reinscripción, calificaciones, tira de materias e intersemestral."
+                    "Aquí ves tus calificaciones, tus materias y tu kardex del SIIA."
                 },
                 fontSize = 13.sp,
                 color = OnPrimaryWhite.copy(alpha = 0.92f),
@@ -188,27 +187,9 @@ private fun Etiqueta(texto: String) {
     }
 }
 
+/** Resumen del periodo actual con las parciales del SIIA. */
 @Composable
-private fun EtiquetaEstatus(estatus: EstatusReinscripcion) {
-    val (texto, color) = when (estatus) {
-        EstatusReinscripcion.REGULAR -> "ESTATUS: ALUMNO REGULAR" to Color(0xFF81C784)
-        EstatusReinscripcion.IRREGULAR -> "ESTATUS: ALUMNO IRREGULAR" to Color(0xFFFFB74D)
-        EstatusReinscripcion.BLOQUEADO -> "ESTATUS: BLOQUEADO" to Color(0xFFE57373)
-    }
-    Surface(shape = RoundedCornerShape(8.dp), color = OnPrimaryWhite.copy(alpha = 0.16f)) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(color))
-            Spacer(modifier = Modifier.width(5.dp))
-            Text(texto, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = OnPrimaryWhite)
-        }
-    }
-}
-
-@Composable
-private fun MateriasYHorarioHoy(uiState: InicioUiState, onReintentar: () -> Unit) {
+private fun ResumenPeriodo(uiState: InicioUiState, onReintentar: () -> Unit, onVerCalificaciones: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
         shape = RoundedCornerShape(16.dp),
@@ -216,102 +197,62 @@ private fun MateriasYHorarioHoy(uiState: InicioUiState, onReintentar: () -> Unit
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.AccessTime, contentDescription = null, tint = GreenPrimary, modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Materias y Horario de Hoy", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = GreenPrimary)
-                }
-                if (uiState.diaHorario.isNotBlank()) {
-                    Surface(shape = RoundedCornerShape(8.dp), color = SuccessContainer) {
-                        Text(
-                            "${uiState.diaHorario} lectivo", fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                            color = GreenPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Insights, contentDescription = null, tint = GreenPrimary, modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Tu periodo actual", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = GreenPrimary)
             }
             Spacer(modifier = Modifier.height(12.dp))
 
+            val resumen = uiState.resumen
             when {
-                uiState.cargandoHorario -> Row(verticalAlignment = Alignment.CenterVertically) {
+                uiState.cargandoResumen -> Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(color = GreenPrimary, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                     Spacer(modifier = Modifier.width(10.dp))
-                    Text("Cargando tu horario...", color = TextMuted, fontSize = 13.sp)
+                    Text("Consultando el SIIA...", color = TextMuted, fontSize = 13.sp)
                 }
-                uiState.errorHorario != null -> Column {
-                    Text(uiState.errorHorario, color = ErrorRed, fontSize = 12.sp)
+                uiState.errorResumen != null -> Column {
+                    Text(uiState.errorResumen, color = ErrorRed, fontSize = 12.sp)
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(onClick = onReintentar, colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary)) {
                         Text("Reintentar")
                     }
                 }
-                uiState.clases.isEmpty() -> Column(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(Icons.Default.EventAvailable, contentDescription = null, tint = TextMuted.copy(alpha = 0.5f), modifier = Modifier.size(36.dp))
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("No tienes clases programadas para hoy.", color = TextMuted, fontSize = 13.sp)
+                uiState.bloqueado -> Text(
+                    "El SIIA bloqueó la consulta de tus calificaciones por trámites pendientes. Revisa el detalle en Calif.",
+                    color = LoginInk, fontSize = 13.sp, lineHeight = 18.sp
+                )
+                resumen == null -> Text("El SIIA todavía no tiene materias registradas en este periodo.", color = TextMuted, fontSize = 13.sp)
+                else -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Indicador("Promedio parcial", resumen.promedio, Modifier.weight(1f))
+                    Indicador("Materias", resumen.totalMaterias.toString(), Modifier.weight(1f))
+                    Indicador("Evaluadas", resumen.evaluadas.toString(), Modifier.weight(1f))
                 }
-                else -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    uiState.clases.forEach { clase -> ClaseHoyCard(clase) }
-                }
+            }
+
+            if (!uiState.cargandoResumen && uiState.errorResumen == null) {
+                Spacer(modifier = Modifier.height(14.dp))
+                Button(
+                    onClick = onVerCalificaciones,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary)
+                ) { Text("Ver mis calificaciones") }
             }
         }
     }
 }
 
 @Composable
-private fun ClaseHoyCard(clase: ClaseHoy) {
-    val (colorEstado, textoEstado) = when (clase.estado) {
-        EstadoClase.EN_CURSO -> GreenSecondary to "EN CURSO"
-        EstadoClase.PROXIMA -> Color(0xFF1976D2) to "PRÓXIMA"
-        EstadoClase.TERMINADA -> TextMuted to "TERMINADA"
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
+private fun Indicador(etiqueta: String, valor: String, modifier: Modifier) {
+    Column(
+        modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .background(BackgroundLight)
-            .padding(10.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(GreenPrimary)
-                .padding(horizontal = 10.dp, vertical = 8.dp)
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("HORA", fontSize = 8.sp, color = OnPrimaryWhite.copy(alpha = 0.7f), fontWeight = FontWeight.Bold)
-                Text(clase.horaInicio, fontSize = 13.sp, color = OnPrimaryWhite, fontWeight = FontWeight.Bold)
-                Text(clase.horaFin, fontSize = 11.sp, color = OnPrimaryWhite.copy(alpha = 0.8f))
-            }
-        }
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(clase.materia, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1A2E22))
-            if (!clase.profesor.isNullOrBlank()) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-                    Icon(Icons.Default.Person, contentDescription = null, tint = TextMuted, modifier = Modifier.size(13.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(clase.profesor, fontSize = 11.sp, color = TextMuted)
-                }
-            }
-            if (!clase.aula.isNullOrBlank()) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-                    Icon(Icons.Default.Room, contentDescription = null, tint = TextMuted, modifier = Modifier.size(13.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(clase.aula, fontSize = 11.sp, color = TextMuted)
-                }
-            }
-        }
-        Surface(shape = RoundedCornerShape(8.dp), color = colorEstado.copy(alpha = 0.15f)) {
-            Text(
-                textoEstado, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = colorEstado,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-            )
-        }
+        Text(valor, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = GreenPrimary)
+        Text(etiqueta, fontSize = 11.sp, color = TextMuted)
     }
 }

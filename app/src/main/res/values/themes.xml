@@ -7,4 +7,10 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:colorBackground">@color/app_canvas</item>
     </style>
+
+    <style name="Theme.AppTeschi.Arranque" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/white</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
+        <item name="postSplashScreenTheme">@style/Theme.AppTeschi</item>
+    </style>
 </resources>

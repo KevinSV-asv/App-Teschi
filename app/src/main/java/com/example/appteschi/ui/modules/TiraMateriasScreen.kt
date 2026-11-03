@@ -35,13 +35,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
-import com.example.appteschi.data.GruposIsc
-import com.example.appteschi.data.MateriaHistorial
 import com.example.appteschi.data.UserSession
 import com.example.appteschi.ui.theme.GreenPrimary
 import com.example.appteschi.ui.theme.GreenSecondary
 import com.example.appteschi.ui.theme.LoginInk
+import com.example.appteschi.viewmodel.MateriaTira
 import com.example.appteschi.viewmodel.TiraMateriasViewModel
+import com.example.appteschi.ui.theme.WarningContainer
+import com.example.appteschi.ui.theme.OnWarningContainer
 import com.example.appteschi.ui.theme.ErrorRed
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -73,7 +74,7 @@ fun TiraMateriasScreen(
             ) {
                 CircularProgressIndicator(color = GreenPrimary)
                 Spacer(modifier = Modifier.height(12.dp))
-                Text("Consultando carga académica...", color = LoginInk)
+                Text("Consultando tus materias en el SIIA...", color = LoginInk)
             }
             return@Scaffold
         }
@@ -103,24 +104,51 @@ fun TiraMateriasScreen(
                 Text("Alumno: ${UserSession.nombreMostrar}", color = Color.Gray, fontSize = 13.sp)
                 Spacer(modifier = Modifier.height(8.dp))
             }
-            item { InfoCard(uiState.periodo, uiState.grupo) }
-            item {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text("Materias asignadas", color = LoginInk, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            item { InfoCard(uiState.periodo, uiState.grupos, uiState.materias.size) }
+            if (uiState.aviso.isNotBlank()) {
+                item { AvisoTira(uiState.aviso, WarningContainer, OnWarningContainer) }
             }
 
-            if (uiState.materias.isEmpty()) {
+            if (uiState.bloqueado) {
                 item {
-                    Card(colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
-                        Text(
-                            "No tienes materias asignadas para este periodo.",
-                            color = Color.Gray,
-                            modifier = Modifier.padding(16.dp)
-                        )
+                    Card(colors = CardDefaults.cardColors(containerColor = WarningContainer)) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                            Text("Consulta bloqueada en el SIIA", color = OnWarningContainer, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(uiState.mensajeBloqueo, color = LoginInk, fontSize = 13.sp)
+                            uiState.pendientes.forEach { pendiente ->
+                                Text("• $pendiente", color = LoginInk, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Complétalos en el portal del SIIA para ver tus materias.", color = Color.Gray, fontSize = 12.sp)
+                        }
                     }
                 }
             } else {
-                items(uiState.materias) { MateriaTiraRow(it) }
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Materias del periodo", color = LoginInk, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+                if (uiState.materias.isEmpty()) {
+                    item {
+                        Card(colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+                            Text(
+                                "El SIIA no tiene materias registradas para ti en este periodo.",
+                                color = Color.Gray,
+                                modifier = Modifier.padding(16.dp)
+                            )
+                        }
+                    }
+                } else {
+                    items(uiState.materias) { MateriaTiraRow(it) }
+                }
+                item {
+                    Text(
+                        "Fuente: SIIA (materias de tus calificaciones parciales del periodo).",
+                        color = Color.Gray,
+                        fontSize = 11.sp
+                    )
+                }
             }
 
             item { Spacer(modifier = Modifier.height(90.dp)) } // deja el último elemento por encima de la barra flotante
@@ -129,13 +157,12 @@ fun TiraMateriasScreen(
 }
 
 @Composable
-private fun InfoCard(periodo: String, grupo: String) {
-    val turno = GruposIsc.turno(grupo)
+private fun InfoCard(periodo: String, grupos: List<String>, totalMaterias: Int) {
     Card(colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            InfoRow("Periodo", periodo)
-            InfoRow("Grupo", grupo)
-            if (turno != null) InfoRow("Turno", turno)
+            InfoRow("Periodo", periodo.ifBlank { "Actual" })
+            if (grupos.isNotEmpty()) InfoRow(if (grupos.size == 1) "Grupo" else "Grupos", grupos.joinToString(", "))
+            InfoRow("Materias", totalMaterias.toString())
         }
     }
 }
@@ -149,7 +176,14 @@ private fun InfoRow(etiqueta: String, valor: String) {
 }
 
 @Composable
-private fun MateriaTiraRow(materia: MateriaHistorial) {
+private fun AvisoTira(texto: String, fondo: Color, colorTexto: Color) {
+    Card(colors = CardDefaults.cardColors(containerColor = fondo)) {
+        Text(texto, color = colorTexto, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(12.dp))
+    }
+}
+
+@Composable
+private fun MateriaTiraRow(materia: MateriaTira) {
     Card(colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
@@ -157,10 +191,12 @@ private fun MateriaTiraRow(materia: MateriaHistorial) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(materia.nombre, color = LoginInk, fontWeight = FontWeight.Medium, fontSize = 13.sp)
-                Text("Semestre ${materia.semestre}", color = Color.Gray, fontSize = 11.sp)
+                Text(materia.materia, color = LoginInk, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                if (materia.profesor.isNotBlank()) Text(materia.profesor, color = Color.Gray, fontSize = 11.sp)
             }
-            Text("${materia.creditos} créditos", color = GreenSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            if (materia.grupo.isNotBlank()) {
+                Text("Grupo ${materia.grupo}", color = GreenSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }

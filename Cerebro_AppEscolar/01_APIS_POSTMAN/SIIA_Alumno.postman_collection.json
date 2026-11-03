@@ -1,0 +1,393 @@
+{
+  "info": {
+    "name": "SIIA TESCHI - Alumno (API 1.2)",
+    "description": "El mismo camino que sigue AppTESCHI, directo a la API oficial del SIIA.\n\nAntes de empezar: en la pestaña Variables de esta colección llena usuario, password y nip en la columna de valor local/actual (Current o Local value), NO en la inicial/compartida (Initial o Shared value), y guarda.\n\nCorre las peticiones en orden: 1 y 2 guardan solas el token; de la 3 a la 7 lo usan. El token dura 8 horas. Solo consulta: nada aquí escribe datos en el SIIA.\n\nLas respuestas traen tus datos reales: no las pegues en el repositorio ni en la bóveda.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://siia.teschi.edu.mx/Teschi/api",
+      "type": "string"
+    },
+    {
+      "key": "usuario",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "",
+      "type": "secret"
+    },
+    {
+      "key": "nip",
+      "value": "",
+      "type": "secret"
+    },
+    {
+      "key": "periodo",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "temp_token",
+      "value": "",
+      "type": "secret"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "secret"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Login (usuario + contraseña)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/login.ashx",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "login.ashx"
+          ]
+        },
+        "description": "Paso 1 del login de la app. Devuelve tempToken (10 min) para el NIP. Máximo 5 intentos por minuto: si responde 429, espera un minuto.",
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"usuario\": \"{{usuario}}\",\n  \"password\": \"{{password}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Usuario y contraseña aceptados\", () => pm.response.to.have.status(200));",
+              "const r = pm.response.json();",
+              "if (r.tempToken) pm.collectionVariables.set(\"temp_token\", r.tempToken);",
+              "if (r.token) pm.collectionVariables.set(\"token\", r.token);",
+              "pm.test(\"Entrega el token temporal para el NIP\", () => pm.expect(r.tempToken || r.token).to.be.a(\"string\").and.not.empty);",
+              "console.log(\"[SIIA] requiereNip=\" + r.requiereNip + \" tieneNip=\" + r.tieneNip + (r.tieneNip === false ? \" -> crea tu NIP en el SIIA o en la app antes de seguir\" : \"\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Verificar NIP",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/nip.ashx",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "nip.ashx"
+          ]
+        },
+        "description": "Paso 2 del login. Devuelve el token final (480 min) que usan las demás peticiones.",
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"accion\": \"verificar\",\n  \"tempToken\": \"{{temp_token}}\",\n  \"nip\": \"{{nip}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"NIP aceptado\", () => pm.response.to.have.status(200));",
+              "const r = pm.response.json();",
+              "if (r.token) pm.collectionVariables.set(\"token\", r.token);",
+              "pm.test(\"Entrega el token final\", () => pm.expect(r.token).to.be.a(\"string\").and.not.empty);",
+              "pm.test(\"El token dura 480 minutos\", () => pm.expect(r.expiraEnMinutos).to.eql(480));",
+              "pm.test(\"La cuenta es de alumno (tipo E)\", () => pm.expect((r.usuarioInfo || {}).tipo).to.eql(\"E\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Calificaciones parciales",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/calificaciones/parciales.ashx",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "calificaciones",
+            "parciales.ashx"
+          ],
+          "query": [
+            {
+              "key": "periodo",
+              "value": "{{periodo}}",
+              "description": "Actívalo para pedir un periodo, p. ej. 2026-1. Apagado = el periodo actual.",
+              "disabled": true
+            }
+          ]
+        },
+        "description": "Ya estaba en la app: módulo Calificaciones > Parciales, Tira de materias y resumen de Inicio."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json();",
+              "const bloqueado = r.bloqueado === true;",
+              "if (bloqueado) {",
+              "    console.log(\"[SIIA] Bloqueado por tramites: se ven \" + ((r.verificaciones || {}).pendientes || []).length + \" pendientes.\");",
+              "    pm.test(\"Bloqueado por tramites pendientes (la app lo muestra como aviso)\", () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+              "} else {",
+              "    pm.test(\"Responde 200\", () => pm.response.to.have.status(200));",
+              "    pm.test(\"Trae la lista de materias\", () => pm.expect(r.calificaciones).to.be.an(\"array\"));",
+              "    pm.test(\"Trae los periodos disponibles\", () => pm.expect(r.periodosDisponibles).to.be.an(\"array\"));",
+              "    console.log(\"[SIIA] Materias: \" + (r.calificaciones || []).length);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Calificaciones finales",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/calificaciones/finales.ashx",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "calificaciones",
+            "finales.ashx"
+          ],
+          "query": [
+            {
+              "key": "periodo",
+              "value": "{{periodo}}",
+              "description": "Actívalo para pedir un periodo, p. ej. 2026-1. Apagado = el periodo actual.",
+              "disabled": true
+            }
+          ]
+        },
+        "description": "NUEVO. Módulo Calificaciones > Finales: 1ra vuelta (ordinario), 2da vuelta (extraordinario) y calificación final, por periodo."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json();",
+              "const bloqueado = r.bloqueado === true;",
+              "if (bloqueado) {",
+              "    console.log(\"[SIIA] Bloqueado por tramites: se ven \" + ((r.verificaciones || {}).pendientes || []).length + \" pendientes.\");",
+              "    pm.test(\"Bloqueado por tramites pendientes (la app lo muestra como aviso)\", () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+              "} else {",
+              "    pm.test(\"Responde 200\", () => pm.response.to.have.status(200));",
+              "    pm.test(\"Trae la lista finales\", () => pm.expect(r.finales).to.be.an(\"array\"));",
+              "    pm.test(\"Trae resumenFinal\", () => pm.expect(r.resumenFinal).to.be.an(\"object\"));",
+              "    pm.test(\"Trae los periodos disponibles\", () => pm.expect(r.periodosDisponibles).to.be.an(\"array\"));",
+              "    const lista = r.finales || [];",
+              "    pm.test(\"Cada materia trae calFinal, primeraVuelta y segundaVuelta\", () => lista.forEach(m => {",
+              "        pm.expect(m).to.include.all.keys(\"materia\", \"calFinal\", \"primeraVuelta\", \"segundaVuelta\");",
+              "    }));",
+              "    pm.test(\"estatusFinal es uno de los valores esperados\", () => lista.forEach(m => {",
+              "        pm.expect(m.estatusFinal).to.be.oneOf([\"Aprobatoria\", \"Reprobatoria\", \"Sin calificar\"]);",
+              "    }));",
+              "    console.log(\"[SIIA] Materias: \" + lista.length + \", con calificacion final: \" + lista.filter(m => m.calFinal !== null).length);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Kardex",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/calificaciones/kardex.ashx",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "calificaciones",
+            "kardex.ashx"
+          ]
+        },
+        "description": "NUEVO. Módulo Kardex: encabezado, promedio global, créditos, materias por semestre y simbología. Puede tardar varios segundos."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json();",
+              "const bloqueado = r.bloqueado === true;",
+              "if (bloqueado) {",
+              "    console.log(\"[SIIA] Bloqueado por tramites: se ven \" + ((r.verificaciones || {}).pendientes || []).length + \" pendientes.\");",
+              "    pm.test(\"Bloqueado por tramites pendientes (la app lo muestra como aviso)\", () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+              "} else {",
+              "    pm.test(\"Responde 200\", () => pm.response.to.have.status(200));",
+              "    pm.test(\"Trae datosPersonales\", () => pm.expect(r.datosPersonales).to.be.an(\"object\"));",
+              "    pm.test(\"Trae semestres con materias\", () => {",
+              "        pm.expect(r.semestres).to.be.an(\"array\").that.is.not.empty;",
+              "        r.semestres.forEach(s => pm.expect(s.materias).to.be.an(\"array\"));",
+              "    });",
+              "    const d = r.datosPersonales || {};",
+              "    pm.test(\"El encabezado trae promedio y créditos\", () => {",
+              "        pm.expect(d).to.include.all.keys(\"promedioGlobal\", \"creditosCarrera\", \"creditosCursados\", \"materiasAprobadas\", \"materiasPorCursar\");",
+              "    });",
+              "    pm.test(\"El encabezado trae los demás datos del historial oficial\", () => {",
+              "        pm.expect(d).to.include.all.keys(\"curp\", \"carrera\", \"especialidad\", \"planEstudios\", \"situacion\", \"grupo\", \"periodoIngreso\", \"ultimoPeriodo\", \"creditosPorCursar\", \"totalMaterias\", \"materiasReprobadas\", \"materiasPorAprobar\", \"promedioLetra\", \"promedioSemestreAnterior\");",
+              "    });",
+              "    const materias = (r.semestres || []).flatMap(s => s.materias || []);",
+              "    pm.test(\"Cada materia trae clave, nombre y cursada AP/NA/PC\", () => materias.forEach(m => {",
+              "        pm.expect(m).to.include.all.keys(\"clave\", \"nombre\", \"cursada\");",
+              "        pm.expect(m.cursada).to.be.oneOf([\"AP\", \"NA\", \"PC\"]);",
+              "    }));",
+              "    console.log(\"[SIIA] Semestres: \" + (r.semestres || []).length + \", materias: \" + materias.length);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Kardex PDF (base64, como la app)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/calificaciones/kardex-pdf.ashx?base64=1",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "calificaciones",
+            "kardex-pdf.ashx"
+          ],
+          "query": [
+            {
+              "key": "base64",
+              "value": "1"
+            }
+          ]
+        },
+        "description": "NUEVO. Lo que usa el botón \"Descargar PDF\" de la app: el PDF oficial dentro de un JSON. El token va en el encabezado, nunca en la URL."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json();",
+              "const bloqueado = r.bloqueado === true;",
+              "if (bloqueado) {",
+              "    console.log(\"[SIIA] Bloqueado por tramites: se ven \" + ((r.verificaciones || {}).pendientes || []).length + \" pendientes.\");",
+              "    pm.test(\"Bloqueado por tramites pendientes (la app lo muestra como aviso)\", () => pm.expect(pm.response.code).to.be.oneOf([200, 403]));",
+              "} else {",
+              "    pm.test(\"Responde 200\", () => pm.response.to.have.status(200));",
+              "    pm.test(\"Trae el archivo en base64\", () => pm.expect(r.base64).to.be.a(\"string\").and.not.empty);",
+              "    pm.test(\"El contenido es un PDF\", () => pm.expect(String(r.base64).startsWith(\"JVBERi\")).to.eql(true));",
+              "    pm.test(\"Trae el nombre del archivo\", () => pm.expect(r.fileName).to.be.a(\"string\").and.not.empty);",
+              "    console.log(\"[SIIA] Tamaño del PDF: \" + r.sizeBytes + \" bytes\");",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Kardex PDF (archivo)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/pdf"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/calificaciones/kardex-pdf.ashx",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "calificaciones",
+            "kardex-pdf.ashx"
+          ]
+        },
+        "description": "NUEVO. El mismo PDF como archivo, para verlo: usa la flecha junto a Send > \"Send and Download\" y guárdalo FUERA del repositorio (trae tus datos reales)."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Responde 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Es un PDF\", () => pm.expect(pm.response.headers.get(\"Content-Type\") || \"\").to.include(\"application/pdf\"));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

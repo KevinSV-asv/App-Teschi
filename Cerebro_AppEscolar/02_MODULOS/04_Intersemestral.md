@@ -1,8 +1,8 @@
 # Módulo 4: Intersemestral
 
-- **Estado:** En diseño
-- **Ruta en App:** `Routes.INTERSEMESTRAL`
-- **Relacionado con:** [[MAPA_PROYECTO]], [[2FA_Login]]
+- **Estado:** 🔴 "Estamos trabajando en este apartado", dentro de la pestaña Reinscripción (`ReinscripcionScreen`, DEC-046, 02/11/2026): la API del SIIA no tiene datos de intersemestrales. Lo de abajo es solo el diseño (25/08/2026).
+- **Ruta en App:** `Routes.REINSCRIPCION` (sección Intersemestral)
+- **Relacionado con:** [[MAPA_PROYECTO]]
 
 ---
 
@@ -16,7 +16,7 @@ Permite al alumno consultar la oferta de materias intersemestrales disponibles, 
 
 | Campo             | Tipo    | Descripción                                          |
 |-------------------|---------|------------------------------------------------------|
-| Clave materia     | String  | Identificador en SIIA                                |
+| Clave materia     | String  | Clave de la materia (plan de estudios)                                |
 | Nombre materia    | String  | Nombre completo                                      |
 | Docente           | String  | Nombre del profesor asignado                         |
 | Capacidad máxima  | Int     | Cupo total del grupo intersemestral                  |
@@ -40,7 +40,7 @@ Permite al alumno consultar la oferta de materias intersemestrales disponibles, 
 
 ## Endpoint API
 
-> ⚠️ **PENDIENTE** — Ver [[01_APIS_POSTMAN]] cuando se documente.
+> Pendiente: el módulo aún no tiene endpoints.
 
 ```
 GET  /api/intersemestral/oferta

@@ -1,13 +1,15 @@
 # Documento de Visión y Alcance — AppTESCHI
 
-> Documento marco del proyecto: qué es, para quién, por qué existe y hasta dónde llega en su estado actual.
+> ⚠️ **Desactualizado (12/10/2026, DEC-043):** describe el sistema con backend propio, base de datos y panel de administrador. Hoy la app solo tiene las pantallas del alumno con datos del SIIA (ver [[REGLAS_PROYECTO]] y [[MAPA_PROYECTO]]). Actualizar antes de entregarlo.
+
+> Documento marco del proyecto: qué es, para quién, por qué existe y hasta dónde llega en su estado actual. Actualizado 27/09/2026.
 > **Relacionado con:** [[MAPA_PROYECTO]], [[REGLAS_PROYECTO]], [[01_Requerimientos_Funcionales]], [[02_Requerimientos_No_Funcionales]]
 
 ---
 
 ## 1. Contexto institucional
 
-El Tecnológico de Estudios Superiores de Chimalhuacán (TESCHI) opera su gestión escolar a través de un portal institucional (SIIA) construido en ASP.NET Web Forms, sin API pública. Los trámites que hoy dependen de ese portal (reinscripción, consulta de calificaciones, tira de materias, kardex) están limitados a navegador de escritorio y no ofrecen una experiencia diseñada para dispositivos móviles, ni una vía para que el personal administrativo dé de alta, edite o consulte alumnos sin pasar por el sistema institucional completo.
+El Tecnológico de Estudios Superiores de Chimalhuacán (TESCHI) opera su gestión escolar a través de un portal institucional (SIIA). Desde septiembre de 2026 el SIIA publica una API REST oficial, pero solo cubre el inicio de sesión y la asistencia de docentes (ver [[API_SIIA_Oficial]]). Los trámites que hoy dependen de ese portal (reinscripción, consulta de calificaciones, tira de materias, kardex) están limitados a navegador de escritorio y no ofrecen una experiencia diseñada para dispositivos móviles, ni una vía para que el personal administrativo dé de alta, edite o consulte alumnos sin pasar por el sistema institucional completo.
 
 ## 2. Problema a resolver
 
@@ -22,7 +24,7 @@ Construir una aplicación Android para alumnos y un panel de administración con
 
 ## 4. Objetivos específicos
 
-- OE-1: Permitir a un alumno iniciar sesión (contra el SIIA real, contra una cuenta propia registrada en la base de datos, o mediante bypass de desarrollo) con verificación en dos pasos (OTP por correo).
+- OE-1: Permitir a un alumno iniciar sesión con su usuario del SIIA (API oficial) o con una cuenta propia, siempre que ya exista en AppTESCHI, con verificación en dos pasos (OTP al correo institucional).
 - OE-2: Dar al alumno acceso a un dashboard con sus módulos escolares (Reinscripción, Tira de Materias, Calificaciones, Kardex, Intersemestral).
 - OE-3: Dar al administrador control total sobre el ciclo de vida de un alumno: alta, consulta, edición, baja (desactivación) y eliminación permanente.
 - OE-4: Permitir al administrador capturar y consultar el historial de calificaciones de cualquier alumno, materia por materia.
@@ -37,18 +39,20 @@ Construir una aplicación Android para alumnos y un panel de administración con
 
 - App Android nativa (Kotlin + Jetpack Compose) para alumno y administrador.
 - API REST propia (`AppTeschi.Api`, Node.js/Express) como intermediaria entre la app y SQL Server.
-- Base de datos SQL Server Express normalizada (identidad de alumnos, catálogo académico, auditoría).
-- Autenticación en cascada (admin de desarrollo → cuenta propia → SIIA) con verificación OTP por correo.
+- Base de datos SQL Server Express normalizada (identidad de alumnos, catálogo académico, auditoría), en un servidor Ubuntu propio.
+- Autenticación con cuenta propia, cuenta de administrador o usuario del SIIA (validado por el backend con la API oficial), con ticket de login, OTP por correo institucional (Microsoft Graph) y token de sesión propio.
 - CRUD completo de alumnos, gestión de calificaciones, auditoría filtrable y estadísticas — todo desde el panel de administrador.
 - Catálogo curricular real de 7 carreras (ISC, Animación Digital y Efectos Visuales, Industrial, Mecatrónica, Química, Administración, Gastronomía), validado contra retículas y horarios oficiales.
 
 ### 5.2 Explícitamente fuera de alcance (por ahora)
 
-- Integración real por scraping con el SIIA para Reinscripción, Tira de Materias, Calificaciones (alumno) y Kardex — estos módulos son funcionales en UI pero **operan con datos simulados** (mock) hasta que exista scraping real o el catálogo se llene con datos del SIIA.
+- Traer del SIIA calificaciones, kardex, tira de materias u horarios: su API oficial no los expone. Esos módulos funcionan con los datos reales de `AppTeschiDB` que captura el administrador.
+- Asistencia de docentes (la API del SIIA la tiene, pero se decidió no usarla).
+- Módulo para docentes (planeado como Fase 3, todavía no iniciado).
 - Pasarela de pago para reinscripción.
 - Notificaciones push.
 - Aplicación para iOS o versión web.
-- Autenticación federada / SSO institucional.
+- Autenticación federada / SSO institucional (el login con el SIIA no es SSO: el backend valida la contraseña y luego la sesión es propia).
 - Multi-idioma (la app y toda su documentación están en español).
 
 ## 6. Actores / Stakeholders
@@ -62,15 +66,15 @@ Construir una aplicación Android para alumnos y un panel de administración con
 
 ## 7. Supuestos
 
-- El servidor SQL Server y la API corren en un equipo con conectividad expuesta hacia internet mediante un túnel (Cloudflare) mientras no exista hospedaje institucional definitivo.
+- El servidor SQL Server y la API corren en un servidor Ubuntu propio, accesible por LAN y Tailscale, mientras no exista hospedaje institucional ni un dominio público (DEC-031).
 - El administrador tiene criterio para decidir cuándo dar de baja (desactivar) versus eliminar (borrar permanentemente) a un alumno.
 - Los datos curriculares sembrados (materias, créditos, grupos) reflejan la retícula oficial vigente al momento de la captura; cambios curriculares futuros requieren actualizar el catálogo manualmente.
 
 ## 8. Restricciones
 
-- El SIIA no expone una API REST — cualquier integración real con él requiere web scraping (OkHttp + Jsoup), no un cliente REST convencional.
+- La API oficial del SIIA solo ofrece login y asistencia; no hay forma oficial de leer datos académicos del SIIA.
 - La app usa exclusivamente Jetpack Compose (sin XML layouts) y el esquema de color institucional fijo (sin modo oscuro).
-- El acceso a los endpoints administrativos requiere una API key compartida (`x-api-key`) — no hay todavía un esquema de autenticación por token de sesión para la API.
+- El acceso a los endpoints requiere un token de sesión (JWT) de alumno o de administrador; ya no existe la API key compartida (DEC-030).
 
 ## 9. Criterios de éxito
 

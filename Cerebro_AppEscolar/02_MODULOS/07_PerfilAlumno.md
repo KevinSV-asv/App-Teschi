@@ -1,50 +1,37 @@
 # Módulo 7: Perfil del Alumno
 
-- **Estado:** ✅ Implementado y real.
-- **Ruta en App:** `Routes.PERFIL_ALUMNO`
-- **Relacionado con:** [[MAPA_PROYECTO]], [[05_RecuperarPassword]], [[06_PanelAdministrador]]
+- **Estado:** ✅ Foto de perfil (DEC-048), datos del SIIA y "Seguridad de la Cuenta" con el diseño del portal (DEC-047, 02/11/2026): el NIP se cambia en la app; la contraseña, en el portal, porque la API no lo permite. ⏳ Falta probar el cambio de NIP con una cuenta real. El perfil anterior (correo de recuperación y cambio de contraseña de la cuenta propia, DEC-027) se quitó con el backend.
+- **Ruta en App:** `Routes.PERFIL_ALUMNO` (botón "Mi perfil" en Inicio)
+- **Relacionado con:** [[MAPA_PROYECTO]], [[2FA_Login]], [[API_SIIA_Oficial]]
 
 ---
 
-## Descripción General
+## Qué tiene
 
-Pantalla del alumno ya logueado para ver sus datos y hacer dos cosas sin salir de la sesión: actualizar su correo de recuperación y cambiar su contraseña dando la actual (distinto del flujo de "olvidé mi contraseña", pensado para cuando *no puede* entrar).
+| Sección | Contenido |
+|---|---|
+| Encabezado | Foto, nombre completo, matrícula y carrera (`area` del SIIA) |
+| Foto de perfil | Tocar la foto o la cámara abre el selector de Android. Con foto, un menú deja cambiarla o quitarla. **Solo existe en ese teléfono**: la API no permite subirla. Es por cuenta y cerrar sesión no la borra |
+| Datos | Correo institucional. Solo lectura: si algo está mal, se corrige en Servicios Escolares |
+| Seguridad de la Cuenta | Selector Ver todo / Solo contraseña / Solo NIP |
+| Contraseña de Acceso | Formulario **apagado**: la API no permite cambiarla. Un aviso lo explica y un botón abre el portal (`ApiConfig.SIIA_PORTAL_URL`) |
+| NIP de Seguridad | Contraseña actual + NIP actual + nuevo + confirmación. Valida antes los datos, comprueba la contraseña con `login.ashx` y cambia con `nip.ashx` (`accion: cambiar`, `Bearer`). El cambio también aplica en el portal del SIIA |
+| Cerrar sesión | Borra la sesión del teléfono y vuelve al login |
 
-Se llega desde el chip con el nombre del alumno, arriba a la derecha del Dashboard — antes ese chip solo cerraba sesión; ahora abre el perfil, y "Cerrar sesión" vive como botón dentro de esta pantalla.
+Un 401 al cambiar el NIP **no** cierra la sesión: puede significar "NIP actual incorrecto"; se muestra el mensaje del SIIA. Tampoco la cierra una contraseña incorrecta.
 
----
+Los secretos solo viven en la pantalla mientras se escriben; al cambiar el NIP se limpian.
 
-## Datos mostrados
+## Archivos
 
-| Campo | Editable | Fuente |
-|---|---|---|
-| Nombre completo | No | `Alumnos.NombreCompleto` — lo controla el director desde el panel de administración |
-| Matrícula | No | `Alumnos.Matricula` |
-| Carrera | No | `CatalogoCarreras` vía `Alumnos.IdCarrera` |
-| Semestre | No | `Alumnos.Semestre` — lo controla el director |
-| Correo institucional | No | `Alumnos.CorreoInstitucional` |
-| Correo de recuperación | **Sí** | `Alumnos.CorreoOtp` — a dónde le llega el código si algún día olvida su contraseña |
+| Capa | Archivo |
+|---|---|
+| UI | `ui/dashboard/PerfilAlumnoScreen.kt` (`FotoAlumno`, `TarjetaContrasena`, `TarjetaNip`, `CampoSeguridad`) |
+| Estado | `viewmodel/PerfilAlumnoViewModel.kt` (`cambiarFoto`, `quitarFoto`, `seleccionarSeccion`, `cambiarNip`, `cerrarSesion`) |
+| Foto | `data/FotoPerfil.kt` (`FotoPerfilStore`, `FotoPerfilArchivos`) |
+| Red | `service/SiiaAuthService.kt` (`login`, `cambiarNip`) |
+| Pruebas | `PerfilAlumnoViewModelTest`, `FotoPerfilTest`, `SiiaHttpAuthServiceTest` |
 
----
+## Cuando exista el endpoint de contraseña
 
-## Endpoints API
-
-```
-GET  /api/mi-perfil/:matricula              → datos completos (x-api-key)
-PUT  /api/mi-perfil/:matricula               → { correoOtp } (x-api-key)
-POST /api/mi-perfil/cambiar-password         → { matricula, passwordActual, passwordNueva } (x-api-key)
-```
-
-- `PUT` valida formato de correo (`400` si no es válido) y solo toca la columna `CorreoOtp` — ningún otro campo se puede editar por esta vía.
-- `cambiar-password` verifica `passwordActual` contra el hash real (`verifyPassword`, scrypt) antes de aceptar la nueva; `401` si no coincide. La nueva contraseña exige la misma política que el resto del sistema (8 caracteres, mayúscula, minúscula, número). Limitado por `excedeLimite` (8 intentos / 10 min por IP+matrícula) igual que el resto de los endpoints sensibles.
-
-Ver DEC-027 en [[DECISIONES_TECNICAS]] para el razonamiento de diseño completo.
-
----
-
-## App
-
-- `PerfilAlumnoService.kt` — `PerfilAlumnoApi` con `obtener`, `actualizarCorreo`, `cambiarPassword`.
-- `PerfilAlumnoViewModel.kt` — mismo patrón que `RecuperarPasswordViewModel`; valida correo y contraseña en cliente antes de llamar al backend.
-- `PerfilAlumnoScreen.kt` — tres tarjetas: datos generales (solo lectura), correo de recuperación (editable), cambiar contraseña; botón de cerrar sesión al final.
-- `PerfilAlumnoViewModelTest.kt` — 12 pruebas unitarias con `FakePerfilAlumnoApi` (carga, error del backend, correo inválido, correo actualizado, contraseña débil/no coincide/actual incorrecta, éxito).
+Agregarlo a `SiiaEndpoints` y `SiiaAuthService`, encender los campos de `TarjetaContrasena`, conectar "Actualizar Contraseña" y quitar el aviso.

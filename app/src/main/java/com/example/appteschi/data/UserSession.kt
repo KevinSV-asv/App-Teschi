@@ -3,23 +3,26 @@ package com.example.appteschi.data
 import android.content.Context
 
 private const val PREFS_NOMBRE = "appteschi_sesion"
+private const val CLAVE_USUARIO = "usuario"
 private const val CLAVE_MATRICULA = "matricula"
-private const val CLAVE_CORREO_OTP = "correoOtp"
 private const val CLAVE_NOMBRE = "nombreCompleto"
-private const val CLAVE_ES_ADMIN = "esAdministrador"
-private const val CLAVE_ADMIN_TOKEN = "adminToken"
-private const val CLAVE_ALUMNO_TOKEN = "alumnoToken"
-private const val CLAVE_ROL = "rol"
-private const val CLAVE_ES_DOCENTE = "esDocente"
-private const val CLAVE_DOCENTE_TOKEN = "docenteToken"
+private const val CLAVE_CORREO = "correo"
+private const val CLAVE_CARRERA = "carrera"
+private const val CLAVE_ID_CARRERA = "idCarrera"
+private const val CLAVE_TOKEN = "tokenSiia"
+private const val CLAVE_EXPIRA = "tokenExpiraEn"
+
+/** Claves de la sesión del backend propio (antes de DEC-043): si aparecen, se borran. */
+private val CLAVES_ANTERIORES = listOf("alumnoToken", "adminToken", "docenteToken", "correoOtp", "sesionSiia", "rol")
+
+/** Margen para dar el token por vencido un poco antes que el SIIA. */
+private const val MARGEN_EXPIRACION_MS = 60_000L
 
 /**
- * Sesión del usuario autenticado. Los campos de administrador (adminToken,
- * rol) se persisten en SharedPreferences para sobrevivir a que Android mate
- * el proceso o a que se reinstale el APK — sin esto, cada reinicio de la app
- * obligaba a repetir el login con OTP aunque el token del servidor (vigente
- * 12h, ver DEC-020) siguiera siendo válido. matricula/correoOtp/nombreCompleto
- * también se guardan para no perder la sesión de alumno en el mismo caso.
+ * Sesión del alumno: el token del SIIA (480 min) y los datos de su cuenta.
+ * Se guarda en SharedPreferences (excluidas del respaldo en la nube, ver
+ * res/xml/backup_rules.xml) para que, mientras el token siga vigente, la app
+ * abra directo en Inicio en lugar de pedir otra vez contraseña y NIP.
  */
 object UserSession {
     private var prefs: android.content.SharedPreferences? = null
@@ -28,113 +31,86 @@ object UserSession {
     fun init(context: Context) {
         prefs = context.applicationContext.getSharedPreferences(PREFS_NOMBRE, Context.MODE_PRIVATE)
         val p = prefs ?: return
+        if (CLAVES_ANTERIORES.any(p::contains)) {
+            p.edit().clear().apply()
+            return
+        }
+        usuario = p.getString(CLAVE_USUARIO, "") ?: ""
         matricula = p.getString(CLAVE_MATRICULA, "") ?: ""
-        correoOtp = p.getString(CLAVE_CORREO_OTP, "") ?: ""
         nombreCompleto = p.getString(CLAVE_NOMBRE, "") ?: ""
-        esAdministrador = p.getBoolean(CLAVE_ES_ADMIN, false)
-        adminToken = p.getString(CLAVE_ADMIN_TOKEN, null)
-        alumnoToken = p.getString(CLAVE_ALUMNO_TOKEN, null)
-        rol = p.getString(CLAVE_ROL, null)
-        esDocente = p.getBoolean(CLAVE_ES_DOCENTE, false)
-        docenteToken = p.getString(CLAVE_DOCENTE_TOKEN, null)
+        correo = p.getString(CLAVE_CORREO, "") ?: ""
+        carrera = p.getString(CLAVE_CARRERA, "") ?: ""
+        idCarrera = p.getInt(CLAVE_ID_CARRERA, -1).takeIf { it >= 0 }
+        token = p.getString(CLAVE_TOKEN, null)
+        tokenExpiraEn = p.getLong(CLAVE_EXPIRA, 0L)
     }
 
+    var usuario: String = ""
+        private set
     var matricula: String = ""
-    var correoOtp: String = ""
+        private set
     var nombreCompleto: String = ""
-    var esAdministrador: Boolean = false
+        private set
+    var correo: String = ""
+        private set
+    var carrera: String = ""
+        private set
+    var idCarrera: Int? = null
+        private set
 
-    /** Token de sesión firmado por el backend — solo lo tiene un administrador
-     *  autenticado (ver DEC-020). Cada llamada a un endpoint administrativo
-     *  lo manda como `Authorization: Bearer <token>`. Vigente 12h en el
-     *  servidor; si expiró, el backend responde 401 y hay que loguearse de
-     *  nuevo — la app no valida la expiración por su cuenta. */
-    var adminToken: String? = null
+    /** Token final del SIIA (después del NIP); va como `Authorization: Bearer`. */
+    var token: String? = null
+        private set
 
-    /** Token de sesión del alumno (DEC-030): lo emite el backend al verificar su
-     *  OTP y es lo que identifica al alumno en los endpoints mi-* y de reinscripción del alumno.
-     *  null en los usuarios de prueba (sem1..sem9, alumno), que no llaman al
-     *  backend con datos reales. */
-    var alumnoToken: String? = null
+    /** Momento (epoch ms) en que vence [token]; 0 si el SIIA no dijo cuándo. */
+    var tokenExpiraEn: Long = 0L
+        private set
 
-    /** SUPERADMIN u OPERADOR — solo tiene sentido cuando esAdministrador es true. */
-    var rol: String? = null
-
-    /** true cuando el usuario autenticado es DOCENTE (Fase 3). */
-    var esDocente: Boolean = false
-
-    /** Token JWT del docente — solo presente si esDocente = true. */
-    var docenteToken: String? = null
-
-    /**
-     * Semestre a simular (solo lo llenan los usuarios de prueba sem1..sem9,
-     * ver AuthRepository). null = usar el historial académico real. No se
-     * persiste a propósito: es un atajo de prueba, no una sesión real.
-     */
-    var semestreSimulado: Int? = null
-
-    /** Semestre "actual" para Tira de Materias/Calificaciones: el simulado si
-     *  hay uno activo, o si no, el semestre real (9, ver HistorialAcademico). */
-    val semestreActual: Int get() = semestreSimulado ?: 9
-
-    fun establecer(
-        matricula: String,
-        correoOtp: String = "",
-        nombreCompleto: String = "",
-        esAdministrador: Boolean = false,
-        semestreSimulado: Int? = null,
-        adminToken: String? = null,
-        rol: String? = null,
-        alumnoToken: String? = null,
-        esDocente: Boolean = false,
-        docenteToken: String? = null
-    ) {
-        this.matricula = matricula
-        this.correoOtp = correoOtp
-        this.nombreCompleto = nombreCompleto
-        this.esAdministrador = esAdministrador
-        this.semestreSimulado = semestreSimulado
-        this.adminToken = adminToken
-        this.alumnoToken = alumnoToken
-        this.rol = rol
-        this.esDocente = esDocente
-        this.docenteToken = docenteToken
+    fun establecer(cuenta: CuentaSiia, token: String, expiraEnMinutos: Int, ahora: Long = System.currentTimeMillis()) {
+        usuario = cuenta.usuario
+        matricula = cuenta.matricula.ifBlank { cuenta.usuario }
+        nombreCompleto = cuenta.nombreCompleto
+        correo = cuenta.correo
+        carrera = cuenta.carrera
+        idCarrera = cuenta.idCarrera
+        this.token = token
+        tokenExpiraEn = if (expiraEnMinutos > 0) ahora + expiraEnMinutos * 60_000L else 0L
         guardar()
     }
 
+    /** true si hay token y no ha vencido. */
+    fun sesionVigente(ahora: Long = System.currentTimeMillis()): Boolean =
+        !token.isNullOrBlank() && (tokenExpiraEn == 0L || ahora < tokenExpiraEn - MARGEN_EXPIRACION_MS)
+
     fun limpiar() {
+        usuario = ""
         matricula = ""
-        correoOtp = ""
         nombreCompleto = ""
-        esAdministrador = false
-        semestreSimulado = null
-        adminToken = null
-        alumnoToken = null
-        rol = null
-        esDocente = false
-        docenteToken = null
+        correo = ""
+        carrera = ""
+        idCarrera = null
+        token = null
+        tokenExpiraEn = 0L
         prefs?.edit()?.clear()?.apply()
     }
 
     private fun guardar() {
         prefs?.edit()?.apply {
+            clear()
+            putString(CLAVE_USUARIO, usuario)
             putString(CLAVE_MATRICULA, matricula)
-            putString(CLAVE_CORREO_OTP, correoOtp)
             putString(CLAVE_NOMBRE, nombreCompleto)
-            putBoolean(CLAVE_ES_ADMIN, esAdministrador)
-            if (adminToken == null) remove(CLAVE_ADMIN_TOKEN) else putString(CLAVE_ADMIN_TOKEN, adminToken)
-            if (alumnoToken == null) remove(CLAVE_ALUMNO_TOKEN) else putString(CLAVE_ALUMNO_TOKEN, alumnoToken)
-            if (rol == null) remove(CLAVE_ROL) else putString(CLAVE_ROL, rol)
-            putBoolean(CLAVE_ES_DOCENTE, esDocente)
-            if (docenteToken == null) remove(CLAVE_DOCENTE_TOKEN) else putString(CLAVE_DOCENTE_TOKEN, docenteToken)
+            putString(CLAVE_CORREO, correo)
+            putString(CLAVE_CARRERA, carrera)
+            idCarrera?.let { putInt(CLAVE_ID_CARRERA, it) }
+            putString(CLAVE_TOKEN, token)
+            putLong(CLAVE_EXPIRA, tokenExpiraEn)
         }?.apply()
     }
 
     val nombreMostrar: String
         get() = when {
             nombreCompleto.isNotBlank() -> nombreCompleto.uppercase()
-            esAdministrador -> "ADMINISTRADOR"
-            esDocente -> "DOCENTE"
             matricula.isNotBlank() -> "ALUMNO $matricula"
             else -> "ALUMNO TESCHI"
         }

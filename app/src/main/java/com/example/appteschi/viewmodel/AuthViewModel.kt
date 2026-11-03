@@ -2,11 +2,10 @@ package com.example.appteschi.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.appteschi.data.AuditTrail
+import com.example.appteschi.data.CuentaSiia
 import com.example.appteschi.data.UserSession
 import com.example.appteschi.data.repository.AuthRepository
 import com.example.appteschi.data.repository.LoginResultado
-import com.example.appteschi.service.TipoCuenta
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,47 +14,38 @@ import kotlinx.coroutines.launch
 
 enum class LoginPaso {
     CREDENCIALES,
-    VERIFICACION
+    /** NIP de 4 dígitos del SIIA (DEC-041). */
+    NIP
 }
 
 data class AuthUiState(
     val paso: LoginPaso = LoginPaso.CREDENCIALES,
-    /** ALUMNO o ADMINISTRADOR — a quién pertenece el paso de OTP en curso. */
-    val tipoPendiente: TipoCuenta = TipoCuenta.ALUMNO,
-    val matriculaValidada: String = "",
-    /** Ticket de 10 min que emite el backend al validar la contraseña; sin él no
-     *  deja pedir ni verificar el OTP (DEC-030). */
-    val ticket: String = "",
+    /** Usuario que escribió el alumno; sirve para saber si la CURP de "¿Olvidaste tu NIP?" es suya. */
+    val usuario: String = "",
+    /** Token temporal del SIIA (10 min) entre la contraseña y el NIP. */
+    val tempToken: String = "",
+    /** Datos de la cuenta que devolvió el paso 1, si los trajo. */
+    val cuentaPaso1: CuentaSiia? = null,
+    /** false = el alumno aún no tiene NIP y debe crearlo. */
+    val tieneNip: Boolean = true,
     val nombreValidado: String = "",
-    /** Solo se llena cuando tipoPendiente == ADMINISTRADOR. */
-    val rolValidado: String? = null,
     val cargando: Boolean = false,
     val mensajeCarga: String? = null,
-    val otpEnviado: Boolean = false,
     val errorLogin: String? = null,
-    val errorEnvio: String? = null,
-    val intentosFallidos: Int = 0,
-    val bloqueado: Boolean = false,
-    val irAlDashboard: Boolean = false,
-    /** true si la cuenta requiere cambio de contraseña */
-    val cambioPw: Boolean = false,
-    /** Correo enmascarado del SIIA (ej. "ke****@gmail.com") — se muestra en paso OTP */
-    val correoSiiaEnmascarado: String = "",
-    /** true si el alumno del SIIA no tiene carrera mapeada */
-    val siiaAlumnoPendiente: Boolean = false,
-    /** true si el usuario del SIIA no tiene correo registrado */
-    val siiaRequiereCorreo: Boolean = false,
-    /** Token de sesión (de administrador o de alumno, según tipoPendiente) —
-     *  se llena tras un verificarOtp exitoso (ver DEC-020 y DEC-030). */
-    val tokenSesion: String? = null
+    val errorNip: String? = null,
+    /** Aviso informativo del paso NIP (p. ej. "Te enviamos tu NIP a …"). */
+    val mensajeNip: String? = null,
+    val irAlDashboard: Boolean = false
 )
 
-/**
- * El código OTP ya no vive aquí (ni en ningún otro lado del cliente): se
- * genera, guarda y verifica enteramente en el backend (ver DEC-019,
- * AuthRepository.enviarOtp/verificarOtpRemoto). Este ViewModel solo orquesta
- * las llamadas y refleja lo que el servidor responde.
- */
+/** Mensaje cuando se intenta el paso NIP sin el token temporal del paso 1. */
+internal const val SESION_VERIFICACION_PERDIDA =
+    "Se perdió el inicio de sesión. Toca \"Regresar\" y vuelve a escribir tu usuario y contraseña."
+
+private val NIP_VALIDO = Regex("^\\d{4}$")
+private val CURP_VALIDA = Regex("^[A-Z0-9]{18}$")
+
+/** Login en dos pasos contra el SIIA: usuario + contraseña, luego NIP (o crearlo). */
 class AuthViewModel(
     private val authRepository: AuthRepository = AuthRepository()
 ) : ViewModel() {
@@ -63,255 +53,99 @@ class AuthViewModel(
     private val _uiState = MutableStateFlow(AuthUiState())
     val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
 
-    fun validarCredenciales(matricula: String, password: String) {
-        val matriculaLimpia = matricula.trim()
-
-        when {
-            matriculaLimpia.isBlank() || password.isBlank() ->
-                _uiState.update { it.copy(errorLogin = "Ingresa tu matrícula y contraseña") }
-            else -> viewModelScope.launch {
-                _uiState.update {
-                    it.copy(
-                        cargando = true,
-                        mensajeCarga = "Validando credenciales…",
-                        errorLogin = null,
-                        errorEnvio = null
-                    )
-                }
-
-                when (val resultado = authRepository.iniciarSesion(matriculaLimpia, password)) {
-                    is LoginResultado.AlumnoPruebaSinOtp ->
-                        entrarComoAlumnoDePrueba(resultado.matricula, resultado.nombre, resultado.semestreSimulado)
-
-                    is LoginResultado.AdministradorRequiereOtp -> avanzarAVerificacion(
-                        tipo = TipoCuenta.ADMINISTRADOR,
-                        identificador = resultado.usuario,
-                        nombre = resultado.nombre,
-                        rol = resultado.rol,
-                        ticket = resultado.ticket
-                    )
-
-                    is LoginResultado.CuentaPropiaRequiereOtp -> avanzarAVerificacion(
-                        tipo = TipoCuenta.ALUMNO,
-                        identificador = resultado.matricula,
-                        nombre = resultado.nombre,
-                        ticket = resultado.ticket
-                    )
-
-                    is LoginResultado.SiiaRequiereOtp -> avanzarAVerificacion(
-                        tipo = resultado.tipo,
-                        identificador = resultado.identificador,
-                        nombre = resultado.nombre,
-                        ticket = resultado.ticket,
-                        correoSiiaEnmascarado = resultado.correoEnmascarado,
-                        cambioPw = resultado.cambioPw
-                    )
-
-                    is LoginResultado.SiiaAlumnoPendiente -> {
-                        _uiState.update {
-                            it.copy(
-                                cargando = false,
-                                mensajeCarga = null,
-                                siiaAlumnoPendiente = true,
-                                nombreValidado = resultado.nombre
-                            )
-                        }
-                    }
-
-                    is LoginResultado.SiiaRequiereCorreo -> {
-                        _uiState.update {
-                            it.copy(
-                                cargando = false,
-                                mensajeCarga = null,
-                                siiaRequiereCorreo = true,
-                                tipoPendiente = resultado.tipo,
-                                matriculaValidada = resultado.identificador
-                            )
-                        }
-                    }
-
-                    is LoginResultado.Rechazado -> {
-                        AuditTrail.record(matriculaLimpia, "Acceso rechazado", "Credenciales inválidas")
-                        _uiState.update {
-                            it.copy(
-                                cargando = false,
-                                mensajeCarga = null,
-                                errorLogin = resultado.mensaje
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private fun avanzarAVerificacion(
-        tipo: TipoCuenta,
-        identificador: String,
-        nombre: String,
-        ticket: String,
-        rol: String? = null,
-        correoSiiaEnmascarado: String = "",
-        cambioPw: Boolean = false
-    ) {
-        _uiState.update {
-            it.copy(
-                cargando = false,
-                mensajeCarga = null,
-                paso = LoginPaso.VERIFICACION,
-                tipoPendiente = tipo,
-                matriculaValidada = identificador,
-                ticket = ticket,
-                nombreValidado = nombre,
-                rolValidado = rol,
-                correoSiiaEnmascarado = correoSiiaEnmascarado,
-                cambioPw = cambioPw,
-                siiaAlumnoPendiente = false,
-                siiaRequiereCorreo = false,
-                otpEnviado = false,
-                intentosFallidos = 0,
-                bloqueado = false,
-                errorLogin = null
-            )
-        }
-    }
-
-    fun enviarCodigoVerificacion(
-        correoOtp: String,
-        onEnviado: (correo: String) -> Unit
-    ) {
-        val correoLimpio = correoOtp.trim().lowercase()
-        val esFlujoSiia = _uiState.value.correoSiiaEnmascarado.isNotBlank()
-        if (!esFlujoSiia && (correoLimpio.isBlank() || !correoLimpio.contains("@"))) {
-            _uiState.update { it.copy(errorEnvio = "Ingresa un correo válido") }
-            return
-        }
-
-        viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    cargando = true,
-                    mensajeCarga = "Enviando código…",
-                    errorEnvio = null
-                )
-            }
-
-            val estado = _uiState.value
-            val resultado = authRepository.enviarOtp(estado.tipoPendiente, estado.matriculaValidada, correoLimpio, estado.ticket)
-            _uiState.update {
-                it.copy(
-                    cargando = false,
-                    mensajeCarga = null,
-                    otpEnviado = resultado.isSuccess,
-                    intentosFallidos = 0,
-                    bloqueado = false,
-                    errorEnvio = resultado.exceptionOrNull()?.message
-                )
-            }
-
-            if (resultado.isSuccess) {
-                onEnviado(correoLimpio)
-            }
-        }
-    }
-
-    fun reenviarOtp(correoOtp: String, onEnviado: (correo: String) -> Unit) {
-        enviarCodigoVerificacion(correoOtp, onEnviado)
-    }
-
-    fun verificarOtp(
-        codigoIngresado: String,
-        onExito: (tokenSesion: String?) -> Unit,
-        onFallo: (mensaje: String) -> Unit
-    ) {
-        // No se exige haber llamado a enviarCodigoVerificacion() en ESTA
-        // sesión de pantalla — el usuario puede traer un código de un envío
-        // anterior, todavía dentro de sus 10 minutos de vigencia ("Ya tengo
-        // un código" en LoginScreen). El backend es quien de verdad sabe si
-        // hay un código pendiente válido; si no lo hay, responde con un
-        // mensaje claro ("No hay un código pendiente...") en vez de que la
-        // app lo bloquee de antemano.
-        if (codigoIngresado.length != 6) {
-            onFallo("Ingresa los 6 dígitos")
-            return
-        }
-
-        viewModelScope.launch {
-            _uiState.update { it.copy(cargando = true, mensajeCarga = "Verificando…") }
-            val estado = _uiState.value
-            val resultado = authRepository.verificarOtpRemoto(estado.tipoPendiente, estado.matriculaValidada, codigoIngresado, estado.ticket)
-            _uiState.update { it.copy(cargando = false, mensajeCarga = null) }
-
-            resultado.fold(
-                onSuccess = { token ->
-                    _uiState.update { it.copy(tokenSesion = token) }
-                    // Se pasa el token directo, en vez de que quien llame lea
-                    // uiState.tokenSesion: ese State (via collectAsState) puede
-                    // no haber alcanzado a propagar el update de arriba todavía
-                    // en este mismo punto — leerlo aquí siempre daba null.
-                    onExito(token)
-                },
-                onFailure = { error ->
-                    val mensaje = error.message ?: "Código incorrecto"
-                    val bloqueadoAhora = mensaje.contains("Demasiados", ignoreCase = true)
-                    _uiState.update {
-                        it.copy(intentosFallidos = it.intentosFallidos + 1, bloqueado = bloqueadoAhora)
-                    }
-                    onFallo(mensaje)
-                }
-            )
-        }
-    }
-
-    fun loginSiia(usuario: String, password: String) {
-        if (usuario.isBlank() || password.isBlank()) {
+    fun validarCredenciales(usuario: String, password: String) {
+        val usuarioLimpio = usuario.trim()
+        if (usuarioLimpio.isBlank() || password.isBlank()) {
             _uiState.update { it.copy(errorLogin = "Ingresa tu usuario y contraseña del SIIA") }
             return
         }
         viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    cargando = true,
-                    mensajeCarga = "Verificando en el SIIA…",
-                    errorLogin = null,
-                    siiaAlumnoPendiente = false,
-                    siiaRequiereCorreo = false
-                )
+            _uiState.update { it.copy(cargando = true, mensajeCarga = "Verificando en el SIIA…", errorLogin = null) }
+            when (val r = authRepository.iniciarSesion(usuarioLimpio, password)) {
+                is LoginResultado.RequiereNip -> _uiState.update {
+                    it.copy(
+                        cargando = false,
+                        mensajeCarga = null,
+                        paso = LoginPaso.NIP,
+                        usuario = usuarioLimpio,
+                        tempToken = r.tempToken,
+                        cuentaPaso1 = r.cuenta,
+                        tieneNip = r.tieneNip,
+                        nombreValidado = r.cuenta?.nombreCompleto.orEmpty(),
+                        errorNip = null,
+                        mensajeNip = null
+                    )
+                }
+                is LoginResultado.Sesion -> entrar(r)
+                is LoginResultado.Rechazado -> _uiState.update {
+                    it.copy(cargando = false, mensajeCarga = null, errorLogin = r.mensaje)
+                }
             }
-            when (val resultado = authRepository.loginSiia(usuario, password)) {
-                is LoginResultado.SiiaRequiereOtp -> avanzarAVerificacion(
-                    tipo = resultado.tipo,
-                    identificador = resultado.identificador,
-                    nombre = resultado.nombre,
-                    ticket = resultado.ticket,
-                    correoSiiaEnmascarado = resultado.correoEnmascarado,
-                    cambioPw = resultado.cambioPw
-                )
-                is LoginResultado.SiiaAlumnoPendiente ->
-                    _uiState.update {
-                        it.copy(
-                            cargando = false,
-                            mensajeCarga = null,
-                            siiaAlumnoPendiente = true,
-                            nombreValidado = resultado.nombre
-                        )
-                    }
-                is LoginResultado.SiiaRequiereCorreo ->
-                    _uiState.update {
-                        it.copy(
-                            cargando = false,
-                            mensajeCarga = null,
-                            siiaRequiereCorreo = true,
-                            tipoPendiente = resultado.tipo,
-                            matriculaValidada = resultado.identificador
-                        )
-                    }
-                is LoginResultado.Rechazado ->
-                    _uiState.update {
-                        it.copy(cargando = false, mensajeCarga = null, errorLogin = resultado.mensaje)
-                    }
-                else -> _uiState.update { it.copy(cargando = false, mensajeCarga = null) }
+        }
+    }
+
+    fun verificarNip(nip: String) {
+        if (!NIP_VALIDO.matches(nip)) {
+            _uiState.update { it.copy(errorNip = "El NIP debe tener 4 dígitos") }
+            return
+        }
+        pasoNip("Verificando tu NIP…") { e -> authRepository.verificarNip(e.tempToken, nip, e.cuentaPaso1) }
+    }
+
+    fun crearNip(nuevoNip: String, confirmarNip: String) {
+        val error = when {
+            !NIP_VALIDO.matches(nuevoNip) -> "El NIP debe tener 4 dígitos"
+            nuevoNip != confirmarNip -> "Los NIP no coinciden"
+            else -> null
+        }
+        if (error != null) {
+            _uiState.update { it.copy(errorNip = error) }
+            return
+        }
+        pasoNip("Creando tu NIP…") { e -> authRepository.crearNip(e.tempToken, nuevoNip, confirmarNip, e.cuentaPaso1) }
+    }
+
+    private fun pasoNip(mensaje: String, llamada: suspend (AuthUiState) -> LoginResultado) {
+        val estado = _uiState.value
+        if (estado.tempToken.isBlank()) {
+            _uiState.update { it.copy(errorNip = SESION_VERIFICACION_PERDIDA) }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(cargando = true, mensajeCarga = mensaje, errorNip = null, mensajeNip = null) }
+            when (val r = llamada(estado)) {
+                is LoginResultado.Sesion -> entrar(r)
+                is LoginResultado.Rechazado -> _uiState.update {
+                    it.copy(cargando = false, mensajeCarga = null, errorNip = r.mensaje)
+                }
+                is LoginResultado.RequiereNip -> _uiState.update { it.copy(cargando = false, mensajeCarga = null) }
             }
+        }
+    }
+
+    fun recuperarNip(curp: String) {
+        val limpia = curp.trim().uppercase()
+        if (!CURP_VALIDA.matches(limpia)) {
+            _uiState.update { it.copy(errorNip = "La CURP debe tener 18 letras y números") }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(cargando = true, mensajeCarga = "Enviando tu NIP…", errorNip = null, mensajeNip = null) }
+            authRepository.recuperarNip(limpia, _uiState.value.usuario).fold(
+                onSuccess = { m -> _uiState.update { it.copy(cargando = false, mensajeCarga = null, mensajeNip = m) } },
+                onFailure = { e ->
+                    _uiState.update {
+                        it.copy(cargando = false, mensajeCarga = null, errorNip = e.message ?: "No se pudo recuperar tu NIP")
+                    }
+                }
+            )
+        }
+    }
+
+    private fun entrar(r: LoginResultado.Sesion) {
+        UserSession.establecer(r.sesion.cuenta, r.sesion.token, r.sesion.expiraEnMinutos)
+        _uiState.update {
+            it.copy(cargando = false, mensajeCarga = null, tempToken = "", irAlDashboard = true)
         }
     }
 
@@ -320,25 +154,6 @@ class AuthViewModel(
     }
 
     fun limpiarErrores() {
-        _uiState.update { it.copy(errorLogin = null, errorEnvio = null) }
-    }
-
-    private fun entrarComoAlumnoDePrueba(matricula: String, nombre: String, semestreSimulado: Int?) {
-        UserSession.establecer(
-            matricula = matricula,
-            nombreCompleto = nombre,
-            esAdministrador = false,
-            semestreSimulado = semestreSimulado
-        )
-        AuditTrail.record(nombre, "Acceso de prueba", "Ingreso sin OTP — solo builds de depuración")
-        _uiState.update {
-            it.copy(
-                cargando = false,
-                mensajeCarga = null,
-                matriculaValidada = matricula,
-                irAlDashboard = true,
-                errorLogin = null
-            )
-        }
+        _uiState.update { it.copy(errorLogin = null, errorNip = null) }
     }
 }

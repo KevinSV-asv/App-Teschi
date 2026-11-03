@@ -1,4 +1,6 @@
-import java.util.Properties
+import com.android.build.api.variant.BuildConfigField
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 plugins {
     alias(libs.plugins.android.application)
@@ -12,10 +14,21 @@ kotlin {
     jvmToolchain(11)
 }
 
-// ── Leer local.properties de forma segura ─────────────────────────────────────
-val localProps = Properties().apply {
-    val f = rootProject.file("local.properties")
-    if (f.exists()) load(f.inputStream())
+// Fecha de compilación que se muestra en el login (BUG-021). Un ValueSource se
+// vuelve a calcular en cada build; LocalDateTime.now() directo en defaultConfig
+// quedaba congelado por la caché de configuración.
+abstract class FechaCompilacion : ValueSource<String, ValueSourceParameters.None> {
+    override fun obtain(): String =
+        LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.buildConfigFields?.put(
+            "FECHA_COMPILACION",
+            providers.of(FechaCompilacion::class) {}.map { BuildConfigField("String", "\"$it\"", null) }
+        )
+    }
 }
 
 android {
@@ -26,16 +39,10 @@ android {
         applicationId    = "com.example.appteschi"
         minSdk           = 24
         targetSdk        = 35
-        versionCode      = 1
-        versionName      = "1.0"
+        versionCode      = 7
+        versionName      = "2.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        // ── Backend AppTeschi.Api — URL y API key centralizadas ────────────
-        // Se leen de local.properties (excluido de Git). Ver ApiConfig.kt.
-        buildConfigField(
-            "String", "API_BASE_URL",
-            "\"${localProps["API_BASE_URL"] ?: "http://10.0.2.2:4000"}\""
-        )
+        // La URL del SIIA vive en ApiConfig.kt (DEC-043): ya no hay backend propio ni local.properties.
     }
 
     buildTypes {
@@ -65,7 +72,7 @@ android {
 
     buildFeatures {
         compose      = true
-        buildConfig  = true   // Necesario para BuildConfig.API_BASE_URL
+        buildConfig  = true   // Necesario para FECHA_COMPILACION y VERSION_NAME
     }
 
     // ── Excluir archivos duplicados de JavaMail (META-INF) ────────────────
@@ -97,20 +104,18 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.core.splashscreen)
 
     // ── Navegación ─────────────────────────────────────────────────────────
     implementation(libs.androidx.navigation.compose)
 
-    // ── Red — consumo del backend AppTeschi.Api ──────────────────────────────
+    // ── Red — API oficial del SIIA ───────────────────────────────────────────
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging.interceptor)
 
     // ── ViewModel + Compose ─────────────────────────────────────────────────
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.4")
-
-    // ── GPS — PENDIENTE (auditoría) ───────────────────────────────────────
-    // implementation(libs.play.services.location)
 
     // ── Tests ──────────────────────────────────────────────────────────────
     testImplementation(libs.junit)

@@ -1,6 +1,8 @@
 # Requerimientos Funcionales — AppTESCHI
 
-> Cada requerimiento tiene un identificador único (`RF-###`) usado por [[03_Matriz_Trazabilidad]] y por [[02_Casos_de_Uso]].
+> ⚠️ **Desactualizado (12/10/2026, DEC-043):** describe el sistema con backend propio, base de datos y panel de administrador. Hoy la app solo tiene las pantallas del alumno con datos del SIIA (ver [[REGLAS_PROYECTO]] y [[MAPA_PROYECTO]]). Actualizar antes de entregarlo.
+
+> Cada requerimiento tiene un identificador único (`RF-###`) usado por [[03_Matriz_Trazabilidad]] y por [[01_Casos_de_Uso]].
 > **Estado:** ✅ Implementado y real · ⚠️ Implementado con datos simulados (mock) · 🔴 Pendiente
 > **Relacionado con:** [[00_Vision_y_Alcance]], [[02_Requerimientos_No_Funcionales]]
 
@@ -10,25 +12,26 @@
 
 | ID | Descripción | Prioridad | Estado |
 |---|---|---|---|
-| RF-001 | El sistema debe permitir iniciar sesión con matrícula y contraseña, validando en cascada: bypass de administrador de desarrollo → cuenta propia (`AlumnoCredenciales`) → SIIA institucional (scraping) | Alta | ✅ |
-| RF-002 | El sistema debe exigir verificación en dos pasos (OTP de 6 dígitos enviado por correo) antes de conceder acceso a una cuenta propia o validada por el SIIA | Alta | ✅ |
+| RF-001 | El sistema debe permitir iniciar sesión con matrícula y contraseña de una cuenta propia (`AlumnoCredenciales`) o de administrador (`AdministradorCredenciales`) | Alta | ✅ |
+| RF-009 | El sistema debe permitir iniciar sesión con usuario y contraseña del SIIA, validados por el backend contra la API oficial del SIIA, a cualquier alumno válido en el SIIA; si no está dado de alta en AppTESCHI entra solo con los datos del SIIA y **nunca** se crea un registro automáticamente (DEC-040) | Alta | ✅ (alumnos registrados, 25/09/2026); sin registro ⏳ sin desplegar; docentes y administrativos pendientes |
+| RF-002 | El sistema debe exigir verificación en dos pasos (OTP de 6 dígitos generado en el servidor y enviado al correo guardado de la cuenta) antes de conceder acceso a una cuenta propia o validada por el SIIA | Alta | ✅ |
 | RF-003 | El código OTP debe expirar 10 minutos después de generado y debe poder reenviarse | Alta | ✅ |
 | RF-004 | El sistema debe bloquear el inicio de sesión tras superar un número máximo de intentos fallidos de OTP configurable | Media | ✅ (umbral configurable, sin bloqueo forzado por defecto) |
 | RF-005 | El sistema debe distinguir el rol (Alumno / Administrador) y navegar al dashboard correspondiente tras el login | Alta | ✅ |
 | RF-006 | El alumno debe poder registrar una cuenta propia (matrícula, nombre, fecha de nacimiento, sistema, carrera, contraseña) | Alta | ✅ |
-| RF-007 | Si la matrícula ya existe como perfil sincronizado (sin contraseña), el registro debe completarlo en vez de crear un perfil duplicado | Alta | ✅ |
-| RF-008 | El sistema debe ofrecer un flujo de recuperación de contraseña | Media | 🔴 (pantalla placeholder) |
+| RF-007 | Si la matrícula ya existe como perfil creado por el administrador (sin contraseña), el registro debe completarlo en vez de crear un perfil duplicado | Alta | ✅ |
+| RF-008 | El sistema debe ofrecer un flujo de recuperación de contraseña para cuentas propias | Media | ✅ (DEC-025) |
 
 ## Dashboard y módulos del alumno
 
 | ID | Descripción | Prioridad | Estado |
 |---|---|---|---|
 | RF-010 | El alumno debe ver un dashboard con acceso a sus módulos escolares | Alta | ✅ |
-| RF-011 | El alumno debe poder consultar y enviar su reinscripción (periodo, grupo, comprobante) | Alta | ⚠️ mock — UI completa, sin backend real ni scraping del SIIA |
-| RF-012 | El alumno debe poder consultar su tira de materias del semestre actual | Alta | ⚠️ mock — datos locales en `HistorialAcademico.kt`, no vienen de la base de datos |
-| RF-013 | El alumno debe poder consultar sus calificaciones del semestre actual con su promedio | Alta | ⚠️ mock |
-| RF-014 | El alumno debe poder consultar su kardex completo (materias, créditos, promedio global, porcentaje cubierto) | Alta | ⚠️ mock (cálculo real sobre datos simulados) |
-| RF-015 | El alumno debe poder generar y descargar su kardex en PDF | Media | ✅ generación de PDF real, sobre datos simulados |
+| RF-011 | El alumno debe poder consultar y enviar su reinscripción (periodo, grupo, comprobante) | Alta | ✅ real (DEC-024) |
+| RF-012 | El alumno debe poder consultar su tira de materias del semestre actual | Alta | ✅ real — `/api/mi-historial` (DEC-023) |
+| RF-013 | El alumno debe poder consultar sus calificaciones del semestre actual con su promedio | Alta | ✅ real (DEC-023) |
+| RF-014 | El alumno debe poder consultar su kardex completo (materias, créditos, promedio global, porcentaje cubierto) | Alta | ✅ real (DEC-023) |
+| RF-015 | El alumno debe poder generar y descargar su kardex en PDF | Media | ✅ |
 | RF-016 | El alumno debe poder consultar el periodo intersemestral disponible | Baja | 🔴 (placeholder) |
 
 ## Gestión de alumnos (actor: Administrador)

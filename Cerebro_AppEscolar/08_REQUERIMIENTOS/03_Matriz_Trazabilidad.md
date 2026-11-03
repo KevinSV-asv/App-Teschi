@@ -1,19 +1,23 @@
 # Matriz de Trazabilidad — Requerimientos → Diseño → Implementación → Prueba
 
+> ⚠️ **Desactualizado (12/10/2026, DEC-043):** describe el sistema con backend propio, base de datos y panel de administrador. Hoy la app solo tiene las pantallas del alumno con datos del SIIA (ver [[REGLAS_PROYECTO]] y [[MAPA_PROYECTO]]). Actualizar antes de entregarlo.
+
 > Conecta cada requerimiento funcional con el caso de uso que lo detalla, la pantalla/servicio que lo implementa, el endpoint y tabla de base de datos involucrados, y el caso de prueba que lo verifica.
-> **Relacionado con:** [[01_Requerimientos_Funcionales]], [[02_Casos_de_Uso]], [[02_Catalogo_Casos_de_Prueba]]
+> Actualizado 27/09/2026.
+> **Relacionado con:** [[01_Requerimientos_Funcionales]], [[01_Casos_de_Uso]], [[02_Catalogo_Casos_de_Prueba]]
 
 | RF | Caso de uso | Pantalla / Servicio (Android) | Endpoint (API) | Tabla(s) BD | Caso de prueba |
 |---|---|---|---|---|---|
-| RF-001 | CU-01 Iniciar sesión | `LoginScreen`, `AuthViewModel`, `AuthRepository` | `POST /api/auth/cuenta` (+ scraping SIIA) | `Alumnos`, `AlumnoCredenciales` | CP-01 |
-| RF-002/003 | CU-01 Iniciar sesión | `AuthViewModel.enviarCodigoVerificacion/verificarOtp` | — (correo SMTP vía `EmailOtpService`) | — | CP-02 |
+| RF-001 | CU-01 Iniciar sesión | `LoginScreen`, `AuthViewModel`, `AuthRepository`, `LocalAccountAuthService`, `AdminAccountAuthService` | `POST /api/auth/cuenta`, `POST /api/auth/administrador` | `Alumnos`, `AlumnoCredenciales`, `Administradores` | CP-01 |
+| RF-009 | CU-01 Iniciar sesión (paso SIIA de la cascada) | `LoginScreen`, `AuthRepository.iniciarSesion`, `SiiaAuthService` | `POST /api/auth/siia` → SIIA `login.ashx` | `Alumnos` (`UsuarioSiia`), `CatalogoCarreras` (`IdCarreraSiia`); sin registro: solo memoria del backend | Prueba manual en teléfono y Postman (27/09/2026); sin registro: prueba local con SIIA simulado 26/26 (28/09/2026) |
+| RF-002/003 | CU-01 Iniciar sesión | `AuthViewModel.enviarCodigoVerificacion/verificarOtp`, `OtpService` | `POST /api/otp/enviar`, `POST /api/otp/verificar` (correo por Microsoft Graph) | `OtpHistorial` | CP-02 |
 | RF-006/007 | CU-02 Registrar cuenta | `RegistroScreen`, `RegistroViewModel` | `POST /api/registro` | `Alumnos`, `AlumnoCredenciales` | CP-03 |
-| RF-008 | — | `RECUPERAR_PASS` (placeholder) | — | — | Pendiente |
+| RF-008 | — | `RecuperarPasswordScreen`, `RecuperarPasswordViewModel` | `POST /api/recuperar-password/solicitar`, `/confirmar` | `OtpHistorial`, `AlumnoCredenciales` | Prueba manual (DEC-025) |
 | RF-010 | CU-03 Consultar dashboard | `DashboardScreen` | `GET /api/usuarios` (indirecto vía sesión) | `Alumnos` | CP-04 |
-| RF-011 | CU-04 Reinscribirse | `ReinscripcionScreen`, `ReinscripcionViewModel` | — (mock) | — | Pendiente (mock) |
-| RF-012 | CU-05 Consultar tira de materias | `TiraMateriasScreen`, `TiraMateriasViewModel` | — (mock, `HistorialAcademico.kt`) | — | Pendiente (mock) |
-| RF-013 | CU-06 Consultar calificaciones (alumno) | `CalificacionesScreen`, `CalificacionesViewModel` | — (mock) | — | Pendiente (mock) |
-| RF-014/015 | CU-07 Consultar y exportar kardex | `KardexScreen`, `KardexViewModel`, `PdfKardexGenerator` | — (mock) | — | Pendiente (mock) |
+| RF-011 | CU-04 Reinscribirse | `ReinscripcionScreen`, `ReinscripcionViewModel`, `ReinscripcionService` | `GET /api/reinscripcion/estatus/:matricula`, `POST /api/reinscripcion/solicitud` | `SolicitudesReinscripcion`, observaciones | Prueba manual (DEC-024) |
+| RF-012 | CU-05 Consultar tira de materias | `TiraMateriasScreen`, `TiraMateriasViewModel`, `HistorialAcademicoService` | `GET /api/mi-historial/:matricula` | `HistorialAcademico`, `Grupos` | Prueba manual (DEC-023) |
+| RF-013 | CU-06 Consultar calificaciones (alumno) | `CalificacionesScreen`, `CalificacionesViewModel` | `GET /api/mi-historial/:matricula` | `HistorialAcademico` | Prueba manual (DEC-023) |
+| RF-014/015 | CU-07 Consultar y exportar kardex | `KardexScreen`, `KardexViewModel`, `PdfKardexGenerator` | `GET /api/mi-historial/:matricula` | `HistorialAcademico`, `PlanEstudioMaterias` | Pruebas unitarias de `KardexPdfFormato` |
 | RF-020/021 | CU-08 Registrar alumno | `AdminAlumnosScreen`, `AdminUsersService.crear` | `POST /api/usuarios` | `Alumnos`, `CatalogoCarreras` | CP-10, CP-11, CP-12 |
 | RF-022 | CU-09 Consultar directorio de alumnos | `AdminAlumnosScreen` | `GET /api/usuarios` | `Alumnos`, `CatalogoCarreras`, `AlumnoCredenciales` | CP-13 |
 | RF-023 | CU-10 Editar alumno | `AdminAlumnosScreen`, `AdminProfileScreen`, `AdminUsersService.actualizarPerfil` | `PUT /api/usuarios/:matricula` | `Alumnos` | CP-14, CP-15 |
@@ -33,6 +37,6 @@
 
 ## Cobertura
 
-- **RF con endpoint real y prueba manual verificada:** 27 de 33 RF marcados ✅ en [[01_Requerimientos_Funcionales]].
-- **RF mock (sin backend real):** Reinscripción, Tira de Materias, Calificaciones (alumno) y Kardex — comparten la causa raíz: dependen de scraping real del SIIA que todavía no existe (ver [[00_Vision_y_Alcance]] §5.2).
-- **RF pendiente:** Recuperar contraseña, Intersemestral.
+- Todos los RF de alumno y administrador tienen endpoint real, salvo **Intersemestral** (RF-016, placeholder).
+- Ya no hay RF con datos simulados: Reinscripción, Tira de Materias, Calificaciones y Kardex leen `AppTeschiDB` desde DEC-023/DEC-024.
+- Pendientes de fondo: login de docentes y administrativos por el SIIA ([[09_Login_SIIA_por_Tipo]]) y automatizar pruebas del backend ([[01_Plan_de_Pruebas]]).

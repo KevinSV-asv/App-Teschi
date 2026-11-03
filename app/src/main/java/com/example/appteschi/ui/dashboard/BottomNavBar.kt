@@ -20,8 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assessment
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EditCalendar
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.automirrored.filled.List
@@ -55,21 +54,20 @@ private data class ItemNavegacion(
 /** Orden real de los tabs — se usa también para decidir la dirección de la
  *  animación al cambiar entre ellos (ver [direccionTransicion] en MainActivity). */
 val TABS_DASHBOARD = listOf(
-    Routes.DASHBOARD, Routes.REINSCRIPCION, Routes.TIRA_MATERIAS,
-    Routes.CALIFICACIONES, Routes.INTERSEMESTRAL, Routes.KARDEX
+    Routes.DASHBOARD, Routes.TIRA_MATERIAS,
+    Routes.CALIFICACIONES, Routes.REINSCRIPCION, Routes.KARDEX
 )
 
 private val itemsNavegacion = listOf(
     ItemNavegacion("Inicio", Icons.Default.Home, Routes.DASHBOARD),
-    ItemNavegacion("Reinscrip.", Icons.Default.Edit, Routes.REINSCRIPCION),
     ItemNavegacion("Materias", Icons.AutoMirrored.Filled.List, Routes.TIRA_MATERIAS),
     ItemNavegacion("Calif.", Icons.Default.Star, Routes.CALIFICACIONES),
-    ItemNavegacion("Intersem.", Icons.Default.DateRange, Routes.INTERSEMESTRAL),
+    ItemNavegacion("Reinscrip.", Icons.Default.EditCalendar, Routes.REINSCRIPCION),
     ItemNavegacion("Kardex", Icons.Default.Assessment, Routes.KARDEX)
 )
 
 /**
- * Barra de navegación inferior flotante (estilo "pill") con los 6 módulos
+ * Barra de navegación inferior flotante (estilo "pill") con los 5 módulos
  * principales del alumno. Reemplaza la rejilla de tarjetas que antes vivía
  * en el Dashboard — ahora esos módulos son destinos de esta barra, siempre
  * visible mientras el alumno navega entre ellos.

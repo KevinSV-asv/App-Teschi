@@ -1,7 +1,10 @@
 # Diagrama de Clases — AppTESCHI
 
+> ⚠️ **Desactualizado (12/10/2026, DEC-043):** describe el sistema con backend propio, base de datos y panel de administrador. Hoy la app solo tiene las pantallas del alumno con datos del SIIA (ver [[REGLAS_PROYECTO]] y [[MAPA_PROYECTO]]). Actualizar antes de entregarlo.
+
 > Modelo de objetos del lado de la aplicación Android (Kotlin). Complementa el diagrama entidad-relación de [[Base_Datos_Usuarios]], que modela la persistencia; este diagrama modela cómo la app representa y mueve esos datos en memoria.
 > **Relacionado con:** [[Base_Datos_Usuarios]], [[04_Diagrama_Componentes]]
+> Dominio de autenticación actualizado 27/09/2026: el OTP lo genera y envía el servidor (`OtpService` solo llama a `/api/otp/*`) y `SiiaAuthService` llama a `POST /api/auth/siia` (ya no scrapea el SIIA).
 
 ---
 
@@ -190,7 +193,7 @@ classDiagram
     }
     class SiiaAuth {
         <<interface>>
-        +validarCredenciales(matricula, password) Result
+        +login(usuario, password) SiiaLoginResultado
     }
     class SiiaAuthService {
         <<object>>
@@ -199,13 +202,14 @@ classDiagram
         <<interface>>
         +enviarOtp(correo, codigo) Result
     }
-    class EmailOtpService {
+    class OtpService {
         <<object>>
+        +enviar(ticket) / verificar(ticket, codigo)
     }
 
     CuentaAuthService <|.. LocalAccountAuthService
     SiiaAuth <|.. SiiaAuthService
-    OtpSender <|.. EmailOtpService
+    OtpSender <|.. OtpService
 
     AuthViewModel --> AuthRepository
     AuthRepository --> CuentaAuthService

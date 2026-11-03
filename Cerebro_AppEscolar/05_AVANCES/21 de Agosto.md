@@ -1,4 +1,4 @@
-# Bitácora de Avances — 21 de Agosto de 2024
+# Bitácora de Avances — 21 de Agosto de 2026
 
 - **Relacionado con:** [[MAPA_PROYECTO]]
 

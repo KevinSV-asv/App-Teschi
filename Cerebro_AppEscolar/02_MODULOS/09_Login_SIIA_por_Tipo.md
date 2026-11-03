@@ -1,177 +1,109 @@
 # Módulo 9: Login unificado con el SIIA (por tipo de usuario)
 
-- **Estado:** 📝 Plan por fases (22/09/2026, reestructurado). Nada implementado todavía.
-- **Alcance:** de la API oficial del SIIA **solo se usa `POST /login.ashx`**. Las APIs de asistencia (`/asistencia/*`) quedan **fuera del proyecto** por decisión del alumno (22/09/2026).
-- **Relacionado con:** [[MAPA_PROYECTO]], [[2FA_Login]], [[00_ARQUITECTURA_API]], [[06_PanelAdministrador]], [[08_Horarios]], [[DECISIONES_TECNICAS]], [[SIIA_Scraping]] (histórico)
+- **Estado:** ✅ Alumnos, directo desde la app al SIIA (DEC-043, 12/10/2026). Docentes y administrativos: la app responde "Por ahora AppTESCHI es solo para alumnos…". Las fases de abajo describen el plan con el backend, que ya no se usa; el flujo vigente está en [[2FA_Login]].
+- **Alcance:** de la API oficial del SIIA **solo se usa `POST /login.ashx`**. La asistencia (`/asistencia/*`) queda **fuera del proyecto** (decisión del alumno, 22/09/2026 y 25/09/2026).
+- **Relacionado con:** [[MAPA_PROYECTO]], [[2FA_Login]], [[API_SIIA_Oficial]], [[00_ARQUITECTURA_API]], [[06_PanelAdministrador]], [[08_Horarios]], [[DECISIONES_TECNICAS]] (DEC-035, DEC-036, DEC-037, DEC-040)
 
 ---
-
-## Qué da el SIIA
-
-`POST https://siia.teschi.edu.mx/Teschi/api/login.ashx` con `{ usuario, password }` (documentación: `…/api/swagger/index.html`).
-
-- **200:** `ok`, `mensaje`, `token` (480 min) y `usuario` con `usuario`, `numUsuario`, `nombre`, `paterno`, `materno`, `nombreCompleto`, `correo` (puede venir vacío), `tipo`, `idArea`, `area`, `idCarrera`, `tipoCarrera`, `permisos`, `cambioPw`, `puedeAsistencia`.
-- **Errores:** 400, 401 (credenciales), 403 (sin acceso), 405, 422, **429** (5 intentos por usuario+IP cada 60 s, con `Retry-After`), 500.
-
-Como no se usa ningún otro endpoint del SIIA, **el token del SIIA no se guarda**: solo prueba que la contraseña es correcta. Después de eso, la sesión es 100% de AppTESCHI (ticket → OTP → JWT propio), igual que hoy.
 
 ## Idea general
 
 ```
-LoginScreen (un solo formulario)
+LoginScreen — formulario único (DEC-038)
    │ usuario SIIA + contraseña
    ▼
 AppTeschi.Api  POST /api/auth/siia ──► SIIA /login.ashx
    │ 1. Valida la contraseña con el SIIA
    │ 2. Clasifica por `tipo`
-   │ 3. Vincula o crea el registro local (Alumnos / Docentes / Administradores)
+   │ 3. Vincula con su registro local si existe; si no, entra sin registro (nunca crea uno, DEC-040)
    │ 4. Devuelve ticket de login (DEC-030)
    ▼
-OTP al correo (flujo actual, DEC-019)  ──►  JWT propio por rol
+OTP al correo guardado (DEC-019, DEC-034)  ──►  JWT propio por rol
    ▼
-Dashboard según el rol:  Alumno  |  Docente  |  Administrador
+Dashboard según el rol:  Alumno  |  Docente (Fase 3)  |  Administrador (Fase 5)
 ```
 
-**Regla de reparto de datos:**
-- El **SIIA** es la fuente de la identidad: quién es, nombre, correo, tipo y contraseña.
-- **AppTeschiDB** es la fuente de lo académico y de los permisos dentro de la app: semestre, historial, reinscripción, horarios y rol de administrador.
+**Reparto de datos:**
+- El **SIIA** es la fuente de la identidad: quién es, tipo y contraseña.
+- **AppTeschiDB** es la fuente de todo lo demás: quién tiene acceso a AppTESCHI, carrera, semestre, historial, reinscripción, horarios y rol de administrador.
 
 ### Reparto por tipo
 
-Los valores exactos de `tipo` se confirman en la fase 0.
-
-| `tipo` del SIIA | Registro local | Token | A dónde entra |
+| `tipo` del SIIA | Registro local | Token | Estado |
 |---|---|---|---|
-| Alumno | `Alumnos`: se vincula por matrícula; si no existe, se da de alta automáticamente | `AUD_ALUMNO` (el actual) | Dashboard del alumno **sin cambios** |
-| Docente | `Docentes` (tabla nueva) | `AUD_DOCENTE` (nuevo) | Dashboard del docente (nuevo) |
-| Administrativo / otro | Solo si está vinculado en `Administradores.UsuarioSiia` | `AUD_ADMIN` (el actual) | Panel del administrador |
-| Cualquier otro caso | — | — | Pantalla "Tu tipo de cuenta aún no tiene acceso a AppTESCHI" |
+| `E` (alumno) | `Alumnos`, por matrícula. **Si no existe entra sin registro** (solo datos del SIIA, nada se guarda, DEC-040) | `AUD_ALUMNO` (`sinRegistro` si no está dado de alta) | ✅ En producción · sin registro ⏳ sin desplegar |
+| Docente | `Docentes` (tabla por crear) | `AUD_DOCENTE` | ⏳ Fase 3 — hoy responde 501 |
+| Administrativo | Solo si un SUPERADMIN lo vinculó en `Administradores.UsuarioSiia` | `AUD_ADMIN` | ⏳ Fase 5 — hoy responde 403 |
+| Cualquier otro | — | — | 403 "tipo de cuenta no soportado" |
 
-> **El SIIA nunca da permisos de administrador por sí solo.** Una cuenta de "administrativo" del SIIA solo entra al panel si un SUPERADMIN la vinculó antes en AppTESCHI.
+> **Al alumno el SIIA le basta para entrar, pero no para tener datos** (DEC-040): sin alta en AppTESCHI solo ve lo que da el SIIA. Los permisos de administrador y los datos académicos nunca salen del SIIA.
 
 ---
 
-## Vistas (app Android)
+## Qué quedó hecho (Fases 1 y 2, alumnos)
 
-### Nuevas
+### Backend (`server.js`)
+- `POST /api/auth/siia` llama al SIIA con `https` nativo (`loginSiiaReal()`, timeout 10 s). **No** usa el `siia-api.js` que se escribió el 23/09 (quedó en la bóveda vieja y se descartó).
+- `mapTipoSiia()`: `E` → ALUMNO, `P` → DOCENTE, `A` → ADMINISTRADOR (Swagger 1.1; `E` también confirmado con logins reales).
+- NIP del SIIA (API 1.1, DEC-041): `/api/auth/siia` → `requiereNip` + `ticketNip`; `/api/auth/siia/nip` verifica o crea el NIP y entrega la sesión directo (sin código por correo); `/api/auth/siia/nip/recuperar` por CURP.
+- Alumno inexistente → entra sin registro: ticket con `sinRegistro`, datos del SIIA y OTP solo en memoria, log `[AUTH-SIIA][SIN-REGISTRO]` (DEC-040; antes 404).
+- Primer login → guarda `Alumnos.UsuarioSiia`.
+- Sin carrera → intenta enlazar por `CatalogoCarreras.IdCarreraSiia` (`[AUTH-SIIA][CARRERA-ENLAZADA]`); si no está mapeada → `cuentaPendiente` + log `[AUTH-SIIA][PENDIENTE] … idCarreraSiia=N area="…"` (DEC-037).
+- Sin ningún correo → ticket con `correoEnmascarado` vacío; la app pide el correo (BUG-022).
+- `POST /api/otp/enviar`: el correo sale del servidor (`CorreoOtp` / `CorreoInstitucional`); el del cliente solo si no hay ninguno, y `/api/otp/verificar` lo guarda al verificar (BUG-022).
 
-| Vista | Rol | Contenido | Fase |
-|---|---|---|---|
-| `CambioPasswordRequeridoScreen` | Todos | Aparece cuando el SIIA manda `cambioPw = 1`: explica que debe cambiarla en el SIIA web y trae un botón para abrirlo | 2 |
-| `CuentaPendienteScreen` | Alumno / otros | Casos "Tu cuenta está pendiente de que control escolar asigne carrera/semestre" y "Tu tipo de cuenta aún no tiene acceso" | 2 |
-| `DocenteDashboardScreen` | Docente | Inicio: hero con nombre, área y fecha, **clases de hoy** (desde `Horarios`) y accesos a Horario y Perfil. Barra inferior propia: Inicio · Horario · Perfil | 3–4 |
-| `DocentePerfilScreen` | Docente | Datos del SIIA en solo lectura (nombre, número de usuario, correo, área), botón "Cambiar contraseña en el SIIA" y cerrar sesión | 3 |
-| `DocenteHorarioScreen` | Docente | Horario semanal por día (materia, grupo, carrera, aula, hora) | 4 |
-| `AdminDocentesScreen` | Administrador | Lista de docentes que ya entraron; activar/desactivar; asignar el "nombre como aparece en el horario" | 4 |
-| Vinculación SIIA en admins | SUPERADMIN | Campo "Usuario SIIA" en el formulario de administradores que ya existe | 5 |
+### App Android
+- `LoginScreen`: formulario único desde el 28/09/2026 (antes pestañas "Cuenta AppTESCHI" / "SIIA", DEC-038); el SIIA es el último paso de la cascada; `CuentaPendienteSection`; `NipSection` (NIP del SIIA, crearlo o recuperarlo por CURP, DEC-041). Si el SIIA no pide NIP, en la verificación se muestra el correo enmascarado sin campo editable.
+- `SiiaAuthService.kt` lee `identificador` de la respuesta (antes buscaba `matricula`/`usuario` y fallaba, BUG-017).
+- `AuthViewModel.enviarCodigoVerificacion()` no exige escribir un correo en el flujo SIIA.
 
-### Modificadas
-
-| Vista | Cambio | Fase |
-|---|---|---|
-| `LoginScreen` | Un solo formulario, "Usuario SIIA" + contraseña. Mensajes claros para 401, 403 y 429 (con cuenta regresiva de `Retry-After`). "¿Olvidaste tu contraseña?" abre el SIIA web | 2 |
-| Pantalla de OTP | Sirve para los 3 roles y muestra el correo enmascarado al que se envió | 2 |
-| Navegación post-login (`MainActivity` / `AuthRepository`) | Enruta según el rol devuelto; nuevo `LoginResultado` por rol | 2 |
-| `PerfilAlumnoScreen` | Etiqueta "Cuenta vinculada al SIIA". Nombre y correo en solo lectura desde el SIIA. "Cambiar contraseña" manda al SIIA web cuando la cuenta es del SIIA | 2 |
-| `RegistroScreen` / `RecuperarPasswordScreen` | Durante la transición se quedan solo para cuentas propias, como opción secundaria. Se decide si se retiran en la fase 6 | 2 / 6 |
-| Dashboard del alumno y sus módulos | **Sin cambios**: siguen usando el mismo JWT de alumno | — |
-
----
-
-## Conexiones (backend `AppTeschi.Api`)
-
-### Nuevas
-
-| Endpoint | Protección | Qué hace | Fase |
-|---|---|---|---|
-| `POST /api/auth/siia` | Límite de intentos | Llama a `/login.ashx`, clasifica por `tipo`, vincula o crea el registro local, actualiza nombre y correo, audita `LOGIN_SIIA`. Responde `{ ok, rol, identificador, nombre, correoEnmascarado, requiereCambioPw, ticket }`. Reenvía el 429 con `Retry-After` | 1 |
-| `GET /api/docente/mi-perfil` | `requireDocente()` | Datos del docente desde `Docentes` | 3 |
-| `GET /api/docente/mi-horario?dia=` | `requireDocente()` | Clases de `Horarios` donde `Profesor` = `Docentes.NombreEnHorario`; sin `dia` devuelve toda la semana | 4 |
-| `GET /api/docentes` | `requireAdmin()` | Lista de docentes con su último acceso | 4 |
-| `PUT /api/docentes/:usuario` | `requireAdmin()` | Activar o desactivar al docente y asignar `NombreEnHorario` (auditado) | 4 |
-
-### Modificadas
-
-| Endpoint | Cambio | Fase |
-|---|---|---|
-| `POST /api/otp/enviar` y `/verificar` | Aceptan `tipo = DOCENTE`. El correo destino sale del servidor (el del SIIA o el `CorreoOtp` guardado), nunca del cliente | 2–3 |
-| `firmarTicketLogin` / `ticketLoginValido` | Aceptan `DOCENTE` | 3 |
-| `PUT /api/administradores/:usuario` | Acepta `usuarioSiia` para vincular | 5 |
-| `POST /api/auth/cuenta` | Se queda como respaldo durante la transición; se decide su retiro en la fase 6 | 6 |
-
-### Archivos y configuración
-- `siia-api.js` (nuevo, mismo patrón que `correo-graph.js`): `loginSiia(usuario, password)` con `fetch`, timeout de 10 s y errores sin datos sensibles.
-- `.env` / `.env.example`: `SIIA_API_URL=https://siia.teschi.edu.mx/Teschi/api`.
-- Nuevos `AUD_DOCENTE`, `firmarTokenDocente()` y `requireDocente()`, calcados de los del alumno.
-
-### Base de datos (`04_BASE_DATOS/sql/`)
-
-| Script | Contenido | Fase |
-|---|---|---|
-| `24_VinculoSiia.sql` | `Alumnos.UsuarioSiia`, `Alumnos.OrigenCuenta` (`PROPIA`/`SIIA`), `CatalogoCarreras.IdCarreraSiia` (equivalencia de carreras) | 2 |
-| `25_Docentes.sql` | Tabla `Docentes` (`IdDocente`, `UsuarioSiia`, `NumUsuario`, `NombreCompleto`, `Correo`, `IdArea`, `Area`, `NombreEnHorario`, `Activo`, `UltimoAcceso`, `CreadoEn`) + `OtpHistorial.IdDocente` | 3 |
-| `26_AdministradoresSiia.sql` | `Administradores.UsuarioSiia` (único, opcional) | 5 |
+### Base de datos
+| Script | Estado |
+|---|---|
+| `24_VinculoSiia.sql` — `Alumnos.UsuarioSiia`, `Alumnos.OrigenCuenta`, `CatalogoCarreras.IdCarreraSiia` | ✅ Aplicado 23/09/2026 (`OrigenCuenta = 'SIIA'` quedó sin uso) |
+| `25_MapeoCarrerasSiia.sql` — equivalencias de carrera (ISC = 4) | ✅ ISC mapeada el 27/09/2026; falta correr la versión nueva para quitar un índice duplicado |
+| `pendientes/Docentes.sql` | ⏳ Fase 3 |
+| `pendientes/AdministradoresSiia.sql` | ⏳ Fase 5 |
 
 ---
 
 ## Plan por fases
 
-Cada fase termina con algo **usable y probado**. No se empieza la siguiente sin cerrar la anterior.
-
 ### Fase 0 — Preparación
-- [ ] Conseguir con TI **cuentas de prueba de cada tipo**: alumno, docente y administrativo.
-- [ ] Averiguar en Postman: **valores reales de `tipo`**; si el `usuario` del alumno es su matrícula; si `correo` viene lleno; qué `idCarrera` corresponde a cada carrera; y qué pasa con `cambioPw`.
-- [ ] Confirmar que el SIIA responde **desde el servidor Ubuntu** (por SSH: `curl` a `/api/swagger/openapi.json`).
-- [ ] Registrar **DEC-035**: "Login unificado con la API oficial del SIIA, por tipo de usuario; asistencia fuera de alcance". Modifica DEC-026 **solo en el login**: los datos académicos siguen siendo propios.
-- **Terminado cuando:** está la tabla de tipos → rol y la de equivalencias de carrera.
+- [x] Valor real de `tipo` para alumnos: `E` (25/09/2026).
+- [x] El `numUsuario` del alumno es su matrícula.
+- [x] El SIIA responde desde el servidor Ubuntu (lo usa en producción).
+- [x] `idCarrera` de ISC = 4.
+- [x] Valores de `tipo` de docente (`P`) y administrativo (`A`): publicados en el Swagger 1.1 (29/09/2026).
+- [ ] Cuentas de prueba de **docente** y **administrativo** (para probar sus flujos).
+- [ ] `idCarrera` de las otras 8 carreras (se van llenando con los logs `[PENDIENTE]`).
 
-### Fase 1 — Conexión base (solo backend)
-- [ ] `siia-api.js`, `SIIA_API_URL` y `POST /api/auth/siia` que **solo valida y clasifica**, todavía sin vincular.
-- [ ] Límite local de intentos y reenvío del 429; auditoría `LOGIN_SIIA`.
-- [ ] Carpeta **SIIA** en la colección de Postman.
-- **Terminado cuando:** Postman recibe el rol correcto con las 3 cuentas de prueba.
+### Fase 1 — Conexión base ✅ (23/09/2026)
 
-### Fase 2 — Alumnos entran con el SIIA
-- **BD:** `24_VinculoSiia.sql` + equivalencias de carrera.
-- **Backend:** vinculación por matrícula. Si el alumno no existe, se crea con los datos del SIIA; si falta semestre o carrera, queda como "pendiente". Ticket → OTP → JWT de alumno.
-- **App:** `LoginScreen` unificado, OTP con correo enmascarado, enrutador por rol, `CambioPasswordRequeridoScreen`, `CuentaPendienteScreen`, ajustes a `PerfilAlumnoScreen`.
-- **Transición:** si el SIIA rechaza la contraseña o no responde, se intenta con la cuenta propia (`/api/auth/cuenta`), para no dejar fuera a nadie mientras se migra.
-- **Terminado cuando:** un alumno real entra con su contraseña del SIIA y ve **su** dashboard de siempre.
+### Fase 2 — Alumnos entran con el SIIA ✅ (25/09/2026)
+- [x] Backend, BD y app (ver arriba).
+- [x] Probado con un alumno real en el teléfono: SIIA → OTP por correo institucional → dashboard.
+- [ ] Desplegar en el servidor el enlace automático de carrera (commit `acd8ffa`, 27/09/2026).
+- [ ] `CambioPasswordRequeridoScreen` cuando el SIIA manda `cambioPw` (hoy solo viaja el dato).
 
-### Fase 3 — Docentes: acceso y perfil
-- **BD:** `25_Docentes.sql`.
-- **Backend:** alta automática del docente en `Docentes`, OTP y token de docente, `requireDocente()`, `GET /api/docente/mi-perfil`.
-- **App:** `SesionDocente`, `DocenteService` (sobre `ClienteHttp`, DEC-033), `DocenteDashboardScreen` (versión inicial: hero + perfil) y `DocentePerfilScreen`.
-- **Terminado cuando:** un docente entra y ve su inicio y su perfil.
+### Fase 3 — Docentes: acceso y perfil ⏳
+- **BD:** `pendientes/Docentes.sql`.
+- **Backend:** vincular docentes (¿alta por el administrador, igual que alumnos?), OTP y token de docente, `requireDocente()`, `GET /api/docente/mi-perfil`.
+- **App:** `DocenteDashboardScreen` real (hoy `Routes.DOCENTE_DASHBOARD` existe pero sin contenido), `DocentePerfilScreen`.
 
-### Fase 4 — Horario del docente + gestión de docentes (admin)
-- **Backend:** `GET /api/docente/mi-horario`, `GET /api/docentes`, `PUT /api/docentes/:usuario`.
-- **App (docente):** "Clases de hoy" en el Inicio y `DocenteHorarioScreen`.
-- **App (admin):** `AdminDocentesScreen`, más una tarjeta "Docentes" en el panel.
-- **Por qué hace falta `NombreEnHorario`:** en `Horarios`, `Profesor` es texto libre que viene del Excel (DEC-029). El administrador empata una sola vez ese nombre con el docente real; no se adivina por parecido.
-- **Terminado cuando:** un docente ve exactamente las clases que el Excel le asigna.
+### Fase 4 — Horario del docente + gestión de docentes ⏳
+- `GET /api/docente/mi-horario`, `GET /api/docentes`, `PUT /api/docentes/:usuario`, `AdminDocentesScreen`.
+- `Docentes.NombreEnHorario` empata al docente con el texto libre de `Horarios.Profesor` (DEC-029).
 
-### Fase 5 — Administradores vinculados al SIIA
-- **BD:** `26_AdministradoresSiia.sql`.
-- **Backend:** si el `usuario` del SIIA está en `Administradores.UsuarioSiia` y el admin está activo → JWT de admin con su rol de siempre.
-- **App:** campo "Usuario SIIA" al crear o editar administradores (solo SUPERADMIN).
-- **Se conserva** `/api/auth/administrador` con cuenta local como **acceso de emergencia** si el SIIA se cae.
-- **Terminado cuando:** un administrativo vinculado entra al panel con su contraseña del SIIA y uno no vinculado es rechazado.
+### Fase 5 — Administradores vinculados al SIIA ⏳
+- `pendientes/AdministradoresSiia.sql`; campo "Usuario SIIA" en el formulario de administradores; `/api/auth/administrador` se queda como acceso de emergencia.
 
-### Fase 6 — Cierre de la transición
-- [ ] Decidir (DEC-036) si se retiran el registro y la cuenta propia de alumno, o si se quedan como respaldo.
-- [ ] Ajustar `RegistroScreen` y `RecuperarPasswordScreen` según esa decisión.
-- [ ] Actualizar [[2FA_Login]], [[REGLAS_PROYECTO]] (aún describe el scraping como vigente), [[00_ARQUITECTURA_API]], [[04_Diagrama_Componentes]], [[03_Diagramas_Secuencia]] y [[01_Casos_de_Uso]] (nuevo actor Docente).
-
-### En cada fase
-- [ ] Pruebas unitarias de los ViewModels y servicios nuevos.
-- [ ] Casos en [[02_Catalogo_Casos_de_Prueba]]: login por tipo, 401, 403, 429, `cambioPw`, cuenta pendiente, SIIA caído → respaldo.
-- [ ] Despliegue con `deploy-desde-windows.ps1` (y `SIIA_API_URL` en el `.env` del servidor).
-- [ ] Entradas en [[CAMBIOS_DE_CODIGO]] y en `05_AVANCES`.
+### Fase 6 — Cierre de la transición ⏳
+- [ ] Decidir si se retiran el registro y la cuenta propia de alumno o se quedan como respaldo.
 
 ---
 
-## Decisiones abiertas
-1. **Alumno sin carrera o semestre en AppTeschiDB:** ¿alta automática como "pendiente" (propuesta) o bloquear hasta que control escolar lo dé de alta?
-2. **Correo para el OTP cuando el SIIA lo manda vacío:** ¿usar el `CorreoOtp` guardado y, si tampoco existe, pedir que lo registre una sola vez?
-3. **Cuentas propias de alumno después de la migración:** ¿se retiran o se quedan como respaldo? (fase 6)
+## Decisiones tomadas (antes "abiertas")
+1. **Alumno que no existe en AppTeschiDB:** entra con los datos del SIIA sin que se cree ningún registro; sus datos académicos aparecen cuando el administrador lo da de alta (DEC-040, 28/09/2026; el alta automática de DEC-039 se descartó).
+2. **Correo del OTP:** el guardado en el servidor; si no hay ninguno, la app lo pide una sola vez.
+3. **Cuentas propias después de la migración:** sigue abierta (Fase 6).

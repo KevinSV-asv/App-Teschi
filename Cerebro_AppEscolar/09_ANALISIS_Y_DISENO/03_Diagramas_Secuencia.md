@@ -1,68 +1,94 @@
 # Diagramas de Secuencia — AppTESCHI
 
+> ⚠️ **Desactualizado (12/10/2026, DEC-043):** describe el sistema con backend propio, base de datos y panel de administrador. Hoy la app solo tiene las pantallas del alumno con datos del SIIA (ver [[REGLAS_PROYECTO]] y [[MAPA_PROYECTO]]). Actualizar antes de entregarlo.
+
 > Interacción temporal entre componentes para los flujos más críticos del sistema.
 > **Relacionado con:** [[01_Casos_de_Uso]], [[04_Diagrama_Componentes]]
 
 ---
 
-## 1. Iniciar sesión (cascada de autenticación + OTP) — CU-01
+## 1. Iniciar sesión (ticket + OTP en el servidor) — CU-01
+
+> Actualizado 27/09/2026. El diagrama anterior mostraba el scraping del SIIA y el OTP generado en el teléfono; ambos se retiraron (DEC-019, DEC-026). Hoy el SIIA se consulta desde el servidor con su API oficial (DEC-035).
+
+### 1a. Paso SIIA de la cascada (cuando la cuenta de AppTESCHI no coincide)
+
+```mermaid
+sequenceDiagram
+    actor U as Alumno
+    participant LS as LoginScreen
+    participant VM as AuthViewModel
+    participant AR as AuthRepository / SiiaAuthService
+    participant API as AppTeschi.Api
+    participant SIIA as API oficial del SIIA
+    participant DB as SQL Server
+    participant MG as Microsoft Graph
+
+    U->>LS: usuario SIIA + contraseña
+    LS->>VM: loginSiia(usuario, password)
+    VM->>AR: loginSiia(...)
+    AR->>API: POST /api/auth/siia
+    API->>SIIA: POST /login.ashx
+    alt credenciales incorrectas
+        SIIA-->>API: 401
+        API-->>AR: 401 "usuario o contraseña incorrectos"
+    else válidas (tipo = E)
+        SIIA-->>API: 200 { usuario: numUsuario, tipo, idCarrera, ... }
+        API->>DB: SELECT Alumnos WHERE Matricula = numUsuario
+        alt no existe en AppTESCHI
+            API->>API: guarda datos del SIIA solo en memoria (nada en la base, DEC-040)
+            API-->>AR: ticket + correoEnmascarado + sinRegistro = true
+            AR-->>VM: SiiaRequiereOtp
+            VM-->>LS: paso = VERIFICACION (el código también vive en memoria)
+        else existe
+            API->>DB: guarda UsuarioSiia (1a vez) · enlaza carrera por IdCarreraSiia (DEC-037)
+            alt carrera sin mapear
+                API-->>AR: cuentaPendiente = true
+            else todo listo
+                API-->>AR: ticket (10 min) + correoEnmascarado (vacío si no hay correo, BUG-022)
+                AR-->>VM: SiiaRequiereOtp
+                VM-->>LS: paso = VERIFICACION (correo no editable, o campo para escribirlo)
+            end
+        end
+    end
+
+    U->>LS: "Enviar código"
+    LS->>VM: enviarCodigoVerificacion()
+    VM->>API: POST /api/otp/enviar (ticket)
+    API->>DB: guarda hash del código (OtpHistorial)
+    API->>MG: sendMail al CorreoOtp guardado
+    U->>LS: código de 6 dígitos
+    LS->>VM: verificarOtp(código)
+    VM->>API: POST /api/otp/verificar (ticket + código)
+    API-->>VM: token de sesión de alumno (12 h)
+    LS->>LS: navigate(Dashboard)
+```
+
+### 1b. Cuenta de AppTESCHI (administrador o cuenta propia) — primeros pasos de la cascada
 
 ```mermaid
 sequenceDiagram
     actor U as Usuario
-    participant LS as LoginScreen
     participant VM as AuthViewModel
     participant AR as AuthRepository
-    participant LA as LocalAccountAuthService
     participant API as AppTeschi.Api
     participant DB as SQL Server
-    participant SIIA as SIIA (scraping)
-    participant OTP as EmailOtpService
 
-    U->>LS: captura matrícula + contraseña
-    LS->>VM: validarCredencialesSiia()
-    VM->>AR: iniciarSesion(matricula, password)
-
-    alt bypass administrador de desarrollo
-        AR-->>VM: AdministradorSinOtp
-        VM-->>LS: irAlDashboard = true
-    else cuenta propia válida
-        AR->>LA: autenticar(matricula, password)
-        LA->>API: POST /api/auth/cuenta
-        API->>DB: SELECT AlumnoCredenciales JOIN Alumnos
-        DB-->>API: hash + salt
-        API->>API: verifyPassword(hash, salt)
-        API-->>LA: 200 ok (nombre)
-        LA-->>AR: success
-        AR-->>VM: CuentaPropiaRequiereOtp
-        VM-->>LS: paso = VERIFICACION
-    else credenciales solo válidas en el SIIA
-        AR->>LA: autenticar(...)
-        LA-->>AR: failure (401)
-        AR->>SIIA: GET Login.aspx (extrae VIEWSTATE)
-        AR->>SIIA: POST credenciales
-        SIIA-->>AR: HTML de sesión válida
-        AR-->>VM: SiiaRequiereOtp
-        VM-->>LS: paso = VERIFICACION
-    else credenciales inválidas en todas las fuentes
-        AR-->>VM: Rechazado(mensaje)
-        VM-->>LS: errorLogin
+    U->>VM: matrícula/usuario + contraseña
+    VM->>AR: iniciarSesion(...)
+    alt usuario de prueba (solo debug)
+        AR-->>VM: entra sin backend
+    else administrador
+        AR->>API: POST /api/auth/administrador
+        API->>DB: Administradores + AdministradorCredenciales (scrypt)
+        API-->>AR: ticket
+    else alumno con cuenta propia
+        AR->>API: POST /api/auth/cuenta
+        API->>DB: Alumnos + AlumnoCredenciales (scrypt)
+        API-->>AR: ticket
     end
-
-    opt requiere OTP
-        U->>LS: captura correo de contacto
-        LS->>VM: enviarCodigoVerificacion(correo)
-        VM->>AR: generarYEnviarOtp(correo)
-        AR->>OTP: enviarOtp(correo, código)
-        OTP-->>AR: ok
-        AR-->>VM: (código, resultado)
-        U->>LS: captura código de 6 dígitos
-        LS->>VM: verificarOtp(código)
-        VM->>VM: compara contra código en memoria (vigencia 10 min)
-        VM-->>LS: onExito() / onFallo()
-    end
-
-    LS->>LS: navController.navigate(Dashboard | AdminDashboard)
+    Note over VM,API: mismo paso de OTP que en 1a → token de alumno o de administrador
+    VM-->>U: Dashboard o AdminDashboard según el rol
 ```
 
 ---
@@ -79,8 +105,8 @@ sequenceDiagram
 
     Admin->>Pantalla: captura matrícula, nombre, carrera, semestre
     Pantalla->>Svc: crear(matricula, nombreCompleto, claveCarrera, ...)
-    Svc->>API: POST /api/usuarios (x-api-key)
-    API->>API: hasValidApiKey()?
+    Svc->>API: POST /api/usuarios (Authorization: Bearer token de admin)
+    API->>API: requireAdmin()?
     API->>DB: SELECT IdCarrera, Existe (subconsultas)
     alt carrera no existe
         DB-->>API: IdCarrera = NULL

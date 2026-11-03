@@ -11,11 +11,6 @@
       "type": "string"
     },
     {
-      "key": "api_key",
-      "value": "{{api_key}}",
-      "type": "string"
-    },
-    {
       "key": "siia_usuario",
       "value": "",
       "type": "string"
@@ -41,6 +36,11 @@
       "type": "string"
     },
     {
+      "key": "ticketNip",
+      "value": "",
+      "type": "string"
+    },
+    {
       "key": "codigo",
       "value": "",
       "type": "string"
@@ -53,6 +53,11 @@
     {
       "key": "siia_base_url",
       "value": "https://siia.teschi.edu.mx/Teschi/api",
+      "type": "string"
+    },
+    {
+      "key": "siia_nip",
+      "value": "",
       "type": "string"
     },
     {
@@ -74,43 +79,20 @@
       "key": "siia_periodo",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "admin_token",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
     {
-      "name": "SIIA - Login real",
-      "description": "Flujo Fase 2: valida contra el SIIA real, emite ticket, envia OTP y verifica. Corre las 3 en orden — cada una guarda automaticamente las variables que necesita la siguiente (ticket, identificador, tipo). Llena antes siia_usuario y siia_password en las variables de la coleccion, y codigo despues de revisar tu correo.",
+      "name": "SIIA - Login real (AppTESCHI)",
+      "description": "Flujo real de la app: el backend valida la contrasena con el SIIA, el SIIA pide su NIP de 4 digitos (DEC-041) y con el NIP correcto el backend entrega la sesion de AppTESCHI; con esa sesion se consultan las calificaciones parciales del SIIA (DEC-042). Llena siia_usuario, siia_password y siia_nip en las variables de la coleccion y corre 1 -> 2 -> 4 en orden: cada una guarda lo que necesita la siguiente. \"3. Crear NIP\" solo si el login dice tieneNip=false (crea el NIP en el SIIA real). Las dos peticiones \"(Sin NIP)\" solo aplican si el SIIA dejara de pedir NIP.",
       "item": [
         {
           "name": "1. Login SIIA (POST /api/auth/siia)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const data = pm.response.json();",
-                  "",
-                  "if (pm.response.code === 200 && data.ok && data.ticket) {",
-                  "    pm.collectionVariables.set(\"ticket\", data.ticket);",
-                  "    pm.collectionVariables.set(\"identificador\", data.identificador);",
-                  "    pm.collectionVariables.set(\"tipo\", data.tipo);",
-                  "    console.log(\"[SIIA] Ticket guardado. Correo enmascarado: \" + data.correoEnmascarado);",
-                  "} else if (data.cuentaPendiente) {",
-                  "    console.log(\"[SIIA] Cuenta pendiente de carrera para: \" + data.nombre);",
-                  "} else if (data.requiereCorreo) {",
-                  "    console.log(\"[SIIA] Falta correo registrado para: \" + data.identificador);",
-                  "} else {",
-                  "    console.log(\"[SIIA] Login fallo: \" + (data.error || pm.response.text()));",
-                  "}",
-                  "",
-                  "pm.test(\"Respuesta procesada\", function () {",
-                  "    pm.expect(pm.response.code).to.be.oneOf([200, 401, 403, 404, 429, 502]);",
-                  "});"
-                ]
-              }
-            }
-          ],
           "request": {
             "method": "POST",
             "header": [
@@ -119,10 +101,6 @@
                 "value": "application/json"
               }
             ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"usuario\": \"{{siia_usuario}}\",\n  \"password\": \"{{siia_password}}\"\n}"
-            },
             "url": {
               "raw": "{{base_url}}/api/auth/siia",
               "host": [
@@ -133,11 +111,215 @@
                 "auth",
                 "siia"
               ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"{{siia_usuario}}\",\n  \"password\": \"{{siia_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Valida usuario y contrasena con el SIIA real. Responde requiereNip + ticketNip (10 min)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (pm.response.code === 200 && data.ok && data.requiereNip) {",
+                  "    pm.collectionVariables.set(\"ticketNip\", data.ticketNip);",
+                  "    console.log(\"[SIIA] Contrasena correcta. tieneNip=\" + data.tieneNip + (data.tieneNip ? \" -> corre 2. Verificar NIP\" : \" -> corre 3. Crear NIP\"));",
+                  "} else if (pm.response.code === 200 && data.ok && data.ticket) {",
+                  "    pm.collectionVariables.set(\"ticket\", data.ticket);",
+                  "    pm.collectionVariables.set(\"identificador\", data.identificador);",
+                  "    pm.collectionVariables.set(\"tipo\", data.tipo);",
+                  "    console.log(\"[SIIA] El SIIA no pidio NIP: usa las peticiones (Sin NIP). Correo: \" + data.correoEnmascarado);",
+                  "} else if (data.cuentaPendiente) {",
+                  "    console.log(\"[SIIA] Cuenta pendiente de carrera para: \" + data.nombre);",
+                  "} else {",
+                  "    console.log(\"[SIIA] Login fallo: \" + (data.error || pm.response.text()));",
+                  "}",
+                  "pm.test(\"Contrasena aceptada por el SIIA\", function () {",
+                  "    pm.expect(pm.response.code).to.eql(200);",
+                  "    pm.expect(data.ok).to.eql(true);",
+                  "});"
+                ]
+              }
             }
-          }
+          ]
         },
         {
-          "name": "2. Enviar codigo OTP (POST /api/otp/enviar)",
+          "name": "2. Verificar NIP (POST /api/auth/siia/nip)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/siia/nip",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "siia",
+                "nip"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticketNip\": \"{{ticketNip}}\",\n  \"nip\": \"{{siia_nip}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Verifica el NIP con el SIIA. Correcto: token de sesion de AppTESCHI (12 h). 5 intentos por inicio de sesion."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.ok && data.token) {",
+                  "    pm.collectionVariables.set(\"alumno_token\", data.token);",
+                  "    pm.collectionVariables.set(\"identificador\", data.identificador);",
+                  "    console.log(\"[NIP] Sesion de AppTESCHI guardada en alumno_token\" + (data.sinRegistro ? \" (alumno sin registro en AppTESCHI)\" : \"\"));",
+                  "} else if (data.cuentaPendiente) {",
+                  "    console.log(\"[NIP] Cuenta pendiente de carrera para: \" + data.nombre);",
+                  "} else {",
+                  "    console.log(\"[NIP] \" + (data.error || pm.response.text()));",
+                  "}",
+                  "pm.test(\"NIP aceptado y sesion entregada\", function () {",
+                  "    pm.expect(pm.response.code).to.eql(200);",
+                  "    pm.expect(data.token).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Crear NIP - solo primera vez (POST /api/auth/siia/nip)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/siia/nip",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "siia",
+                "nip"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticketNip\": \"{{ticketNip}}\",\n  \"nuevoNip\": \"{{siia_nip}}\",\n  \"confirmarNip\": \"{{siia_nip}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Solo si 1. Login respondio tieneNip=false. Registra siia_nip como NIP en el SIIA real (409 si ya tenia uno)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.ok && data.token) {",
+                  "    pm.collectionVariables.set(\"alumno_token\", data.token);",
+                  "    pm.collectionVariables.set(\"identificador\", data.identificador);",
+                  "    console.log(\"[NIP] NIP creado en el SIIA; sesion guardada en alumno_token\");",
+                  "} else {",
+                  "    console.log(\"[NIP] \" + (data.error || pm.response.text()));",
+                  "}",
+                  "pm.test(\"El backend respondio\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 400, 401, 409, 422, 429, 502]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Mis calificaciones parciales (GET /api/mi-calificaciones-siia)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{alumno_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/mi-calificaciones-siia",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "mi-calificaciones-siia"
+              ],
+              "query": [
+                {
+                  "key": "periodo",
+                  "value": "{{siia_periodo}}",
+                  "description": "Opcional (ej. 2026-1). Desactivado = periodo actual.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Calificaciones parciales del SIIA a traves del backend (el token del SIIA se queda en el servidor). Requiere 2. Verificar NIP."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.ok && data.bloqueado) {",
+                  "    console.log(\"[CALIF] Bloqueado en el SIIA: \" + data.mensaje + \" | pendientes: \" + (data.pendientes || []).join(\", \"));",
+                  "} else if (data.ok) {",
+                  "    console.log(\"[CALIF] periodo=\" + data.periodo + \" materias=\" + (data.calificaciones || []).length + \" periodos=\" + (data.periodosDisponibles || []).join(\", \") + (data.aviso ? \" aviso: \" + data.aviso : \"\"));",
+                  "} else {",
+                  "    console.log(\"[CALIF] \" + (data.error || pm.response.text()));",
+                  "}",
+                  "pm.test(\"Calificaciones entregadas\", function () {",
+                  "    pm.expect(pm.response.code).to.eql(200);",
+                  "    pm.expect(data.ok).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "(Sin NIP) Enviar codigo OTP (POST /api/otp/enviar)",
           "event": [
             {
               "listen": "test",
@@ -181,7 +363,7 @@
           }
         },
         {
-          "name": "3. Verificar codigo OTP (POST /api/otp/verificar)",
+          "name": "(Sin NIP) Verificar codigo OTP (POST /api/otp/verificar)",
           "event": [
             {
               "listen": "test",
@@ -271,7 +453,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"usuario\": \"{{siia_usuario}}\",\n  \"password\": \"{{siia_password}}\"\n}"
+              "raw": "{\n  \"usuario\": \"{{siia_usuario}}\",\n  \"password\": \"{{siia_password}}\",\n  \"nip\": \"{{siia_nip}}\"\n}"
             },
             "url": {
               "raw": "{{siia_base_url}}/login.ashx",
@@ -282,7 +464,7 @@
                 "login.ashx"
               ]
             },
-            "description": "Valida el usuario del SIIA y devuelve un token (480 min) + los datos reales del usuario (tipo, idCarrera, correo, etc). Maximo 5 intentos por usuario+IP cada 60s."
+            "description": "API 1.1: con \"nip\" (4 dígitos, variable siia_nip) devuelve el token final de 480 min en un paso y lo guarda en siia_token. Sin NIP solo valida la contraseña y devuelve requiereNip + tempToken. Máximo 5 intentos por usuario+IP cada 60 s."
           }
         },
         {
@@ -453,6 +635,101 @@
               ]
             }
           }
+        },
+        {
+          "name": "5. Calificaciones parciales",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "console.log(\"[SIIA-REAL][CALIFICACIONES] status=\" + pm.response.code + \" ok=\" + data.ok + \" mensaje=\" + (data.mensaje || \"\") + \" materias=\" + ((data.calificaciones || []).length));",
+                  "pm.test(\"El SIIA respondio\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 400, 401, 403, 404]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{siia_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{siia_base_url}}/calificaciones/parciales.ashx",
+              "host": [
+                "{{siia_base_url}}"
+              ],
+              "path": [
+                "calificaciones",
+                "parciales.ashx"
+              ],
+              "query": [
+                {
+                  "key": "periodo",
+                  "value": "{{siia_periodo}}",
+                  "description": "Opcional (ej. 2026-1). Vacío o desactivado = periodo actual.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Calificaciones parciales del alumno del token (API 1.1). Requiere el token final: primero \"1. Login (SIIA real)\" con siia_nip lleno. 403 + bloqueado=true si tiene trámites pendientes."
+          }
+        },
+        {
+          "name": "6. Login con matricula + NIP (login-nip.ashx)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{siia_base_url}}/login-nip.ashx",
+              "host": [
+                "{{siia_base_url}}"
+              ],
+              "path": [
+                "login-nip.ashx"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matricula\": \"{{siia_usuario}}\",\n  \"nip\": \"{{siia_nip}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Nuevo en la API (05/10/2026): login solo con matricula + NIP, sin contrasena, para apps moviles. Devuelve el token final en siia_token."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "console.log(\"[SIIA-REAL][LOGIN-NIP] status=\" + pm.response.code + \" ok=\" + data.ok + \" mensaje=\" + (data.mensaje || \"\"));",
+                  "if (pm.response.code === 200 && data.ok && data.token) {",
+                  "    pm.collectionVariables.set(\"siia_token\", data.token);",
+                  "}",
+                  "pm.test(\"El SIIA respondio\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 400, 401, 403, 422, 429]);",
+                  "});"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -473,44 +750,13 @@
       }
     },
     {
-      "name": "Sincronizar usuarios completos",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          },
-          {
-            "key": "x-api-key",
-            "value": "{{api_key}}"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "[\n  {\n    \"username\": \"20240001\",\n    \"name\": \"Jose Garcia Lopez\",\n    \"correo\": \"alumno@gmail.com\",\n    \"correoInstitucional\": \"20240001@teschi.edu.mx\",\n    \"carrera\": \"Ingenieria en Sistemas\",\n    \"role\": \"ALUMNO\"\n  },\n  {\n    \"username\": \"admin\",\n    \"name\": \"Administrador local\",\n    \"correo\": \"admin@gmail.com\",\n    \"correoInstitucional\": \"admin@teschi.edu.mx\",\n    \"carrera\": \"Administracion\",\n    \"role\": \"ADMINISTRADOR\"\n  }\n]"
-        },
-        "url": {
-          "raw": "{{base_url}}/api/usuarios/sync",
-          "host": [
-            "{{base_url}}"
-          ],
-          "path": [
-            "api",
-            "usuarios",
-            "sync"
-          ]
-        }
-      }
-    },
-    {
       "name": "Consultar usuarios",
       "request": {
         "method": "GET",
         "header": [
           {
-            "key": "x-api-key",
-            "value": "{{api_key}}"
+            "key": "Authorization",
+            "value": "Bearer {{admin_token}}"
           }
         ],
         "url": {
@@ -522,7 +768,8 @@
             "api",
             "usuarios"
           ]
-        }
+        },
+        "description": "Requiere el token de un administrador (login de administrador → OTP) en la variable admin_token."
       }
     },
     {

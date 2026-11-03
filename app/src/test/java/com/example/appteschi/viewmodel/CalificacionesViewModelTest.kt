@@ -1,10 +1,11 @@
 package com.example.appteschi.viewmodel
 
-import com.example.appteschi.data.EstatusMateria
-import com.example.appteschi.data.PlanDeEstudiosIsc
-import com.example.appteschi.data.UserSession
-import com.example.appteschi.testutil.FakeHistorialAcademicoApi
-import com.example.appteschi.testutil.historialDeAlumnoDePrueba
+import com.example.appteschi.service.ResultadoFinales
+import com.example.appteschi.service.ResultadoParciales
+import com.example.appteschi.testutil.FakeCalificacionesSiiaApi
+import com.example.appteschi.testutil.finalesDePrueba
+import com.example.appteschi.testutil.parcialesBloqueadas
+import com.example.appteschi.testutil.parcialesDePrueba
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -13,6 +14,8 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -23,95 +26,178 @@ class CalificacionesViewModelTest {
     private val dispatcher = StandardTestDispatcher()
 
     @Before
-    fun setUp() {
-        Dispatchers.setMain(dispatcher)
-        UserSession.limpiar()
-    }
+    fun setUp() = Dispatchers.setMain(dispatcher)
 
     @After
-    fun tearDown() {
-        Dispatchers.resetMain()
-        UserSession.limpiar()
-    }
-
-    private fun api() = FakeHistorialAcademicoApi(Result.success(historialDeAlumnoDePrueba()))
+    fun tearDown() = Dispatchers.resetMain()
 
     @Test
-    fun `muestra exactamente las materias del semestre actual, ni una mas ni una menos`() = runTest {
-        UserSession.establecer(matricula = "2099000001")
-        val viewModel = CalificacionesViewModel(api())
+    fun `al abrir pide el periodo actual y muestra las parciales`() = runTest {
+        val api = FakeCalificacionesSiiaApi()
+        val vm = CalificacionesViewModel(api)
         dispatcher.scheduler.advanceUntilIdle()
 
-        val esperado = historialDeAlumnoDePrueba().materias.filter { it.semestre == 9 }
-        assertEquals(esperado, viewModel.uiState.value.materias)
-    }
-
-    @Test
-    fun `cada calificacion mostrada es identica a la que tiene esa misma materia en el Kardex`() = runTest {
-        UserSession.establecer(matricula = "2099000001")
-        val viewModel = CalificacionesViewModel(api())
-        dispatcher.scheduler.advanceUntilIdle()
-
-        viewModel.uiState.value.materias.forEach { materiaEnCalificaciones ->
-            val materiaEnKardex = historialDeAlumnoDePrueba().materias.first { it.nombre == materiaEnCalificaciones.nombre }
-            assertEquals(
-                "La calificación de '${materiaEnCalificaciones.nombre}' no coincide con el Kardex",
-                materiaEnKardex.calificacion,
-                materiaEnCalificaciones.calificacion
-            )
-            assertEquals(materiaEnKardex.estatus, materiaEnCalificaciones.estatus)
-        }
+        assertEquals(listOf<String?>(null), api.periodosPedidos)
+        val e = vm.uiState.value
+        assertFalse(e.cargando)
+        assertNull(e.error)
+        assertEquals(parcialesDePrueba(), e.parciales)
     }
 
     @Test
-    fun `hoy el alumno esta en noveno y Residencias Profesionales aparece como pendiente, sin calificacion`() = runTest {
-        UserSession.establecer(matricula = "2099000001")
-        val viewModel = CalificacionesViewModel(api())
+    fun `cambiar de periodo consulta ese periodo`() = runTest {
+        val api = FakeCalificacionesSiiaApi(porPeriodo = mapOf("2025-2" to ResultadoParciales.Datos(parcialesDePrueba("2025-2"))))
+        val vm = CalificacionesViewModel(api)
         dispatcher.scheduler.advanceUntilIdle()
-
-        val estado = viewModel.uiState.value
-        assertEquals(9, estado.semestreActual)
-
-        val residencias = estado.materias.first { it.nombre == "Residencias Profesionales" }
-        assertEquals(EstatusMateria.POR_CURSAR, residencias.estatus)
-        assertEquals(null, residencias.calificacion)
+        vm.seleccionarPeriodo("2025-2")
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("2025-2", vm.uiState.value.parciales!!.periodo)
     }
 
     @Test
-    fun `hoy el noveno semestre tiene Actividades Complementarias y Residencias Profesionales, nada mas`() = runTest {
-        UserSession.establecer(matricula = "2099000001")
-        val viewModel = CalificacionesViewModel(api())
+    fun `elegir el mismo periodo no vuelve a consultar`() = runTest {
+        val api = FakeCalificacionesSiiaApi()
+        val vm = CalificacionesViewModel(api)
         dispatcher.scheduler.advanceUntilIdle()
-
-        val nombres = viewModel.uiState.value.materias.map { it.nombre }.toSet()
-        assertEquals(setOf("Actividades Complementarias", "Residencias Profesionales"), nombres)
+        vm.seleccionarPeriodo("2026-2")
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(1, api.periodosPedidos.size)
     }
 
     @Test
-    fun `usuario de prueba sem3 ve todas las materias de tercer semestre, todas pendientes`() = runTest {
-        UserSession.establecer(matricula = "sem3", esAdministrador = false, semestreSimulado = 3)
-        val historial = FakeHistorialAcademicoApi()
-        val viewModel = CalificacionesViewModel(historial)
+    fun `si falla otro periodo se conservan las parciales y se avisa`() = runTest {
+        val api = FakeCalificacionesSiiaApi(porPeriodo = mapOf("2025-2" to ResultadoParciales.Error("El SIIA no respondió.")))
+        val vm = CalificacionesViewModel(api)
         dispatcher.scheduler.advanceUntilIdle()
-
-        val estado = viewModel.uiState.value
-        assertEquals(3, estado.semestreActual)
-        val esperadas = PlanDeEstudiosIsc.materias.count { it.semestre == 3 }
-        assertEquals(esperadas, estado.materias.size)
-        assertTrue(estado.materias.all { it.semestre == 3 })
-        assertTrue(estado.materias.all { it.calificacion == null && it.estatus == EstatusMateria.POR_CURSAR })
-        assertEquals(0, historial.llamadas)
+        vm.seleccionarPeriodo("2025-2")
+        dispatcher.scheduler.advanceUntilIdle()
+        val e = vm.uiState.value
+        assertEquals("2026-2", e.parciales!!.periodo)
+        assertEquals("No se pudo cargar el periodo 2025-2. El SIIA no respondió.", e.errorPeriodo)
+        assertNull(e.error)
     }
 
     @Test
-    fun `si la consulta de historial falla, el estado pasa a tener error`() = runTest {
-        UserSession.establecer(matricula = "2099000001")
-        val historial = FakeHistorialAcademicoApi(Result.failure(IllegalStateException("No existe un alumno con esa matrícula")))
-        val viewModel = CalificacionesViewModel(historial)
+    fun `si falla al abrir muestra el error con reintentar`() = runTest {
+        val vm = CalificacionesViewModel(FakeCalificacionesSiiaApi(ResultadoParciales.Error("No se pudo conectar con el SIIA.")))
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("No se pudo conectar con el SIIA.", vm.uiState.value.error)
+        assertNull(vm.uiState.value.parciales)
+    }
+
+    @Test
+    fun `bloqueado por tramites no es un error`() = runTest {
+        val vm = CalificacionesViewModel(FakeCalificacionesSiiaApi(ResultadoParciales.Datos(parcialesBloqueadas())))
+        dispatcher.scheduler.advanceUntilIdle()
+        assertNull(vm.uiState.value.error)
+        assertTrue(vm.uiState.value.parciales!!.bloqueado)
+    }
+
+    private fun abierto(api: FakeCalificacionesSiiaApi) =
+        CalificacionesViewModel(api).also { dispatcher.scheduler.advanceUntilIdle() }
+
+    @Test
+    fun `las finales se piden hasta abrir esa vista y con el periodo que se veia`() = runTest {
+        val api = FakeCalificacionesSiiaApi()
+        val vm = abierto(api)
+        assertTrue(api.periodosFinalesPedidos.isEmpty())
+
+        vm.seleccionarVista(VistaCalificaciones.FINALES)
         dispatcher.scheduler.advanceUntilIdle()
 
-        val estado = viewModel.uiState.value
-        assertTrue(!estado.cargando)
-        assertEquals("No existe un alumno con esa matrícula", estado.error)
+        assertEquals(listOf<String?>("2026-2"), api.periodosFinalesPedidos)
+        assertEquals(VistaCalificaciones.FINALES, vm.uiState.value.vista)
+        assertFalse(vm.uiState.value.cargandoFinales)
+        assertEquals(finalesDePrueba(), vm.uiState.value.finales)
+    }
+
+    @Test
+    fun `volver a finales con el mismo periodo no consulta otra vez`() = runTest {
+        val api = FakeCalificacionesSiiaApi()
+        val vm = abierto(api)
+        vm.seleccionarVista(VistaCalificaciones.FINALES)
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.seleccionarVista(VistaCalificaciones.PARCIALES)
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.seleccionarVista(VistaCalificaciones.FINALES)
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(1, api.periodosFinalesPedidos.size)
+        assertEquals(1, api.periodosPedidos.size)
+    }
+
+    @Test
+    fun `el periodo elegido en finales se conserva al volver a parciales`() = runTest {
+        val api = FakeCalificacionesSiiaApi(
+            porPeriodo = mapOf("2025-2" to ResultadoParciales.Datos(parcialesDePrueba("2025-2"))),
+            finalesPorPeriodo = mapOf("2025-2" to ResultadoFinales.Datos(finalesDePrueba("2025-2")))
+        )
+        val vm = abierto(api)
+        vm.seleccionarVista(VistaCalificaciones.FINALES)
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.seleccionarPeriodo("2025-2")
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("2025-2", vm.uiState.value.finales!!.periodo)
+        assertEquals("2026-2", vm.uiState.value.parciales!!.periodo)
+
+        vm.seleccionarVista(VistaCalificaciones.PARCIALES)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals("2025-2", vm.uiState.value.parciales!!.periodo)
+    }
+
+    @Test
+    fun `el periodo elegido en parciales se usa al abrir finales`() = runTest {
+        val api = FakeCalificacionesSiiaApi(
+            porPeriodo = mapOf("2025-2" to ResultadoParciales.Datos(parcialesDePrueba("2025-2"))),
+            finalesPorPeriodo = mapOf("2025-2" to ResultadoFinales.Datos(finalesDePrueba("2025-2")))
+        )
+        val vm = abierto(api)
+        vm.seleccionarPeriodo("2025-2")
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.seleccionarVista(VistaCalificaciones.FINALES)
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("2025-2", vm.uiState.value.finales!!.periodo)
+    }
+
+    @Test
+    fun `si las parciales fallaron las finales se piden sin periodo`() = runTest {
+        val api = FakeCalificacionesSiiaApi(resultado = ResultadoParciales.Error("Sin parciales."))
+        val vm = abierto(api)
+        vm.seleccionarVista(VistaCalificaciones.FINALES)
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(listOf<String?>(null), api.periodosFinalesPedidos)
+        assertEquals(finalesDePrueba(), vm.uiState.value.finales)
+        assertEquals("Sin parciales.", vm.uiState.value.error)
+    }
+
+    @Test
+    fun `si las finales fallan se ve el error y reintentar vuelve a pedirlas`() = runTest {
+        val api = FakeCalificacionesSiiaApi(resultadoFinales = ResultadoFinales.Error("Sin finales."))
+        val vm = abierto(api)
+        vm.seleccionarVista(VistaCalificaciones.FINALES)
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("Sin finales.", vm.uiState.value.errorFinales)
+
+        vm.reintentar()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(2, api.periodosFinalesPedidos.size)
+        assertEquals(1, api.periodosPedidos.size)
+    }
+
+    @Test
+    fun `un periodo de finales que falla conserva lo que ya se veia`() = runTest {
+        val api = FakeCalificacionesSiiaApi(
+            finalesPorPeriodo = mapOf("2025-2" to ResultadoFinales.Error("Sin ese periodo."))
+        )
+        val vm = abierto(api)
+        vm.seleccionarVista(VistaCalificaciones.FINALES)
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.seleccionarPeriodo("2025-2")
+        dispatcher.scheduler.advanceUntilIdle()
+        val e = vm.uiState.value
+        assertEquals("2026-2", e.finales!!.periodo)
+        assertNull(e.errorFinales)
+        assertEquals("No se pudo cargar el periodo 2025-2. Sin ese periodo.", e.errorPeriodoFinales)
     }
 }

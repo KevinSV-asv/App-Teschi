@@ -1,8 +1,7 @@
 package com.example.appteschi.ui.login
 
-import android.widget.Toast
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -14,21 +13,20 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Badge
-import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Pin
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -41,21 +39,19 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.example.appteschi.BuildConfig
-import com.example.appteschi.core.config.ApiConfig
-import com.example.appteschi.data.UserSession
+import com.example.appteschi.R
 import com.example.appteschi.Routes
-import com.example.appteschi.service.TipoCuenta
 import com.example.appteschi.ui.theme.GreenPrimary
 import com.example.appteschi.ui.theme.GreenSecondary
 import com.example.appteschi.ui.theme.LoginFieldBg
 import com.example.appteschi.ui.theme.LoginGreenBright
-import com.example.appteschi.ui.theme.LoginGreenDark
 import com.example.appteschi.ui.theme.LoginInk
 import com.example.appteschi.ui.theme.OnPrimaryWhite
 import com.example.appteschi.ui.theme.TextMuted
 import com.example.appteschi.viewmodel.AuthViewModel
 import com.example.appteschi.viewmodel.LoginPaso
 
+/** Login con la cuenta del SIIA: usuario + contraseña y después el NIP de 4 dígitos (DEC-041, DEC-043). */
 @Composable
 fun LoginScreen(navController: NavController) {
     val authViewModel: AuthViewModel = viewModel()
@@ -63,32 +59,15 @@ fun LoginScreen(navController: NavController) {
 
     var matricula by remember { mutableStateOf("") }
     var password  by remember { mutableStateOf("") }
-    var correoOtp by remember { mutableStateOf("") }
-    var modeSiia  by remember { mutableStateOf(false) }  // true = pestaña SIIA
-    var codigo2FA by remember { mutableStateOf("") }
-    // Si el usuario ya tiene un código de un envío anterior (p. ej. la app se
-    // fue a segundo plano y regresó a este paso desde cero), no debería tener
-    // que pedir uno nuevo solo para que aparezca el campo — "Ya tengo un
-    // código" lo revela directo, sin volver a llamar a /api/otp/enviar.
-    var tengoCodigo by remember { mutableStateOf(false) }
-    var mostrarConfigServidor by remember { mutableStateOf(false) }
-    val context = LocalContext.current
+    var nip by remember { mutableStateOf("") }
+    var nuevoNip by remember { mutableStateOf("") }
+    var confirmarNip by remember { mutableStateOf("") }
+    var curp by remember { mutableStateOf("") }
+    var recuperandoNip by remember { mutableStateOf(false) }
 
-    val onCodigoEnviado: (String) -> Unit = { correo ->
-        codigo2FA = ""
-        Toast.makeText(context, "Código enviado a $correo", Toast.LENGTH_LONG).show()
-    }
-
-    // ── Navegación post-login para administrador ──────────────────────────────
-    // irAlDashboard se activa desde AuthViewModel cuando el login es exitoso sin OTP
     LaunchedEffect(uiState.irAlDashboard) {
         if (uiState.irAlDashboard) {
-            val destino = when {
-                UserSession.esAdministrador -> Routes.ADMIN_DASHBOARD
-                UserSession.esDocente       -> Routes.DOCENTE_DASHBOARD
-                else                        -> Routes.DASHBOARD
-            }
-            navController.navigate(destino) {
+            navController.navigate(Routes.DASHBOARD) {
                 popUpTo(Routes.LOGIN) { inclusive = true }
             }
         }
@@ -132,188 +111,71 @@ fun LoginScreen(navController: NavController) {
                         .padding(horizontal = 20.dp, vertical = 18.dp)
                 ) {
                     when (uiState.paso) {
-                        LoginPaso.CREDENCIALES -> {
-                            if (uiState.siiaAlumnoPendiente) {
-                                CuentaPendienteSection(
-                                    nombre = uiState.nombreValidado,
-                                    onVolver = { authViewModel.volverAlLogin() }
-                                )
-                            } else {
-                                CredencialesSection(
-                                    matricula = matricula,
-                                    password = password,
-                                    modeSiia = modeSiia,
-                                    errorLogin = uiState.errorLogin,
-                                    cargando = uiState.cargando,
-                                    mensajeCarga = uiState.mensajeCarga,
-                                    onMatriculaChange = {
-                                        matricula = it
-                                        authViewModel.limpiarErrores()
-                                    },
-                                    onPasswordChange = {
-                                        password = it
-                                        authViewModel.limpiarErrores()
-                                    },
-                                    onModeChange = { siia ->
-                                        modeSiia = siia
-                                        matricula = ""
-                                        password = ""
-                                        authViewModel.limpiarErrores()
-                                    },
-                                    onOlvidoClick = { navController.navigate(Routes.RECUPERAR_PASS) },
-                                    onIniciarSesion = {
-                                        if (modeSiia) authViewModel.loginSiia(matricula, password)
-                                        else authViewModel.validarCredenciales(matricula, password)
-                                    }
-                                )
-                            }
-                        }
-
-                        LoginPaso.VERIFICACION -> VerificacionSection(
-                            correoOtp = correoOtp,
-                            correoEnmascaradoSiia = uiState.correoSiiaEnmascarado,
-                            codigo2FA = codigo2FA,
-                            correoEnviado = uiState.otpEnviado,
-                            mostrarCampoCodigo = uiState.otpEnviado || tengoCodigo,
-                            errorEnvio = uiState.errorEnvio,
-                            bloqueado = uiState.bloqueado,
+                        LoginPaso.CREDENCIALES -> CredencialesSection(
+                            matricula = matricula,
+                            password = password,
+                            errorLogin = uiState.errorLogin,
                             cargando = uiState.cargando,
                             mensajeCarga = uiState.mensajeCarga,
-                            intentosFallidos = uiState.intentosFallidos,
-                            onCorreoChange = {
-                                correoOtp = it
+                            onMatriculaChange = {
+                                matricula = it
                                 authViewModel.limpiarErrores()
                             },
-                            onCodigoChange = { if (it.length <= 6) codigo2FA = it },
-                            onEnviarCodigo = {
-                                authViewModel.enviarCodigoVerificacion(correoOtp, onCodigoEnviado)
+                            onPasswordChange = {
+                                password = it
+                                authViewModel.limpiarErrores()
                             },
-                            onReenviar = {
-                                authViewModel.reenviarOtp(correoOtp, onCodigoEnviado)
+                            onIniciarSesion = { authViewModel.validarCredenciales(matricula, password) }
+                        )
+
+                        LoginPaso.NIP -> NipSection(
+                            tieneNip = uiState.tieneNip,
+                            nombre = uiState.nombreValidado,
+                            nip = nip,
+                            nuevoNip = nuevoNip,
+                            confirmarNip = confirmarNip,
+                            curp = curp,
+                            recuperando = recuperandoNip,
+                            cargando = uiState.cargando,
+                            mensajeCarga = uiState.mensajeCarga,
+                            error = uiState.errorNip,
+                            mensaje = uiState.mensajeNip,
+                            onNipChange = { nip = soloDigitos(it); authViewModel.limpiarErrores() },
+                            onNuevoNipChange = { nuevoNip = soloDigitos(it); authViewModel.limpiarErrores() },
+                            onConfirmarNipChange = { confirmarNip = soloDigitos(it); authViewModel.limpiarErrores() },
+                            onCurpChange = { curp = it.uppercase().filter { c -> c.isLetterOrDigit() }.take(18) },
+                            onEntrar = {
+                                if (uiState.tieneNip) authViewModel.verificarNip(nip)
+                                else authViewModel.crearNip(nuevoNip, confirmarNip)
                             },
-                            onTengoCodigo = { tengoCodigo = true },
+                            onRecuperar = { recuperandoNip = !recuperandoNip },
+                            onEnviarCurp = { authViewModel.recuperarNip(curp) },
                             onVolver = {
                                 authViewModel.volverAlLogin()
-                                codigo2FA = ""
-                                tengoCodigo = false
-                            },
-                            onVerificar = {
-                                authViewModel.verificarOtp(
-                                    codigoIngresado = codigo2FA,
-                                    onExito = { tokenSesion ->
-                                        val esAdmin    = uiState.tipoPendiente == TipoCuenta.ADMINISTRADOR
-                                        val esDocente  = uiState.tipoPendiente == TipoCuenta.DOCENTE
-                                        UserSession.establecer(
-                                            matricula     = uiState.matriculaValidada,
-                                            correoOtp     = correoOtp.trim().lowercase(),
-                                            nombreCompleto = uiState.nombreValidado,
-                                            esAdministrador = esAdmin,
-                                            esDocente     = esDocente,
-                                            adminToken    = if (esAdmin) tokenSesion else null,
-                                            docenteToken  = if (esDocente) tokenSesion else null,
-                                            alumnoToken   = if (!esAdmin && !esDocente) tokenSesion else null,
-                                            rol           = uiState.rolValidado
-                                        )
-                                        val destino = when {
-                                            esAdmin   -> Routes.ADMIN_DASHBOARD
-                                            esDocente -> Routes.DOCENTE_DASHBOARD
-                                            else      -> Routes.DASHBOARD
-                                        }
-                                        navController.navigate(destino) {
-                                            popUpTo(Routes.LOGIN) { inclusive = true }
-                                        }
-                                    },
-                                    onFallo = { msg ->
-                                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                    }
-                                )
-                            },
-                            onVolverInicio = {
-                                authViewModel.volverAlLogin()
-                                codigo2FA = ""
-                                tengoCodigo = false
+                                nip = ""; nuevoNip = ""; confirmarNip = ""; curp = ""
+                                recuperandoNip = false
                             }
                         )
                     }
                 }
 
                 // ── Sección verde inferior (branding) ─────────────────────────
-                // Solo en builds de depuración: el enlace para cambiar la URL del
-                // backend sin recompilar. Vive dentro del pie (antes flotaba encima
-                // de todo, en gris sobre verde y tapado por la barra de navegación).
-                LoginBrandingFooter(
-                    onRegistrarse = { navController.navigate(Routes.REGISTRO) },
-                    servidor = if (BuildConfig.DEBUG) {
-                        ApiConfig.BASE_URL.removePrefix("https://").removePrefix("http://")
-                    } else null,
-                    onServidorClick = { mostrarConfigServidor = true }
-                )
+                LoginBrandingFooter()
             }
         }
         }
     }
-
-    if (mostrarConfigServidor) {
-        ConfigServidorDialog(
-            onCerrar = { mostrarConfigServidor = false }
-        )
-    }
-}
-
-@Composable
-private fun ConfigServidorDialog(onCerrar: () -> Unit) {
-    var url by remember { mutableStateOf(ApiConfig.urlPersonalizada() ?: ApiConfig.BASE_URL) }
-
-    AlertDialog(
-        onDismissRequest = onCerrar,
-        title = { Text("URL del servidor (solo depuración)") },
-        text = {
-            Column {
-                Text(
-                    "Pégala tal cual la imprime iniciar-appteschi.ps1, sin / al final.",
-                    fontSize = 12.sp,
-                    color = TextMuted
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = url,
-                    onValueChange = { url = it },
-                    singleLine = true,
-                    placeholder = { Text("https://xxxx.trycloudflare.com") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                ApiConfig.establecerUrlPersonalizada(url)
-                onCerrar()
-            }) { Text("Guardar") }
-        },
-        dismissButton = {
-            Row {
-                TextButton(onClick = {
-                    ApiConfig.establecerUrlPersonalizada(null)
-                    onCerrar()
-                }) { Text("Usar la de por defecto") }
-                TextButton(onClick = onCerrar) { Text("Cancelar") }
-            }
-        }
-    )
 }
 
 @Composable
 private fun CredencialesSection(
     matricula: String,
     password: String,
-    modeSiia: Boolean,
     errorLogin: String?,
     cargando: Boolean,
     mensajeCarga: String?,
     onMatriculaChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
-    onModeChange: (Boolean) -> Unit,
-    onOlvidoClick: () -> Unit,
     onIniciarSesion: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -324,44 +186,18 @@ private fun CredencialesSection(
         color = GreenPrimary
     )
 
-    // Pestañas: Cuenta propia / SIIA
-    val tabs = listOf("Cuenta AppTESCHI", "SIIA")
-    TabRow(
-        selectedTabIndex = if (modeSiia) 1 else 0,
-        containerColor = androidx.compose.ui.graphics.Color.Transparent,
-        contentColor = GreenPrimary,
-        modifier = Modifier.padding(bottom = 12.dp, top = 6.dp)
-    ) {
-        tabs.forEachIndexed { index, titulo ->
-            Tab(
-                selected = (modeSiia && index == 1) || (!modeSiia && index == 0),
-                onClick = { onModeChange(index == 1) },
-                text = { Text(titulo, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
-            )
-        }
-    }
-
-    if (!modeSiia) {
-        Text(
-            text = "Ingresa tus credenciales de AppTESCHI",
-            fontSize = 13.sp,
-            color = TextMuted,
-            modifier = Modifier.padding(bottom = 14.dp)
-        )
-    } else {
-        Text(
-            text = "Ingresa tus credenciales del SIIA escolar",
-            fontSize = 13.sp,
-            color = TextMuted,
-            modifier = Modifier.padding(bottom = 14.dp)
-        )
-    }
+    Text(
+        text = "Entra con tu usuario y contraseña del SIIA",
+        fontSize = 13.sp,
+        color = TextMuted,
+        modifier = Modifier.padding(top = 4.dp, bottom = 14.dp)
+    )
 
     LoginField(
-        label = if (modeSiia) "Usuario SIIA" else "Matrícula",
+        label = "Matrícula o usuario",
         value = matricula,
         onValueChange = onMatriculaChange,
-        placeholder = if (modeSiia) "Número de control" else "Ej. 202400123",
+        placeholder = "Ej. 202400123",
         icon = Icons.Default.Badge,
         keyboardType = KeyboardType.Text
     )
@@ -386,19 +222,7 @@ private fun CredencialesSection(
         )
     }
 
-    Text(
-        text = "¿Olvidaste tu contraseña?",
-        color = GreenSecondary,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier
-            .padding(top = 6.dp, bottom = 4.dp)
-            .align(Alignment.Start)
-            .clip(RoundedCornerShape(6.dp))
-            .clickable(role = Role.Button, onClick = onOlvidoClick)
-            .padding(vertical = 8.dp)
-    )
-
+    Spacer(modifier = Modifier.height(14.dp))
     Button(
         onClick = onIniciarSesion,
         enabled = !cargando,
@@ -420,47 +244,45 @@ private fun CredencialesSection(
             Text("Iniciar Sesión", fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
     }
+
+    // La contraseña es la del SIIA: se recupera en su portal, no en la app.
+    Text(
+        text = "¿Olvidaste tu contraseña? Recupérala en el portal del SIIA.",
+        fontSize = 12.sp,
+        color = TextMuted,
+        textAlign = TextAlign.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp)
+    )
     }
 }
 
+private fun soloDigitos(valor: String): String = valor.filter(Char::isDigit).take(4)
+
+/** Paso 2 del login SIIA (DEC-041): NIP de 4 dígitos, o crearlo si aún no tiene. */
 @Composable
-private fun VerificacionSection(
-    correoOtp: String,
-    correoEnmascaradoSiia: String = "",
-    codigo2FA: String,
-    correoEnviado: Boolean,
-    /** true si ya debe verse el campo de código — por haberlo enviado en esta
-     *  sesión de pantalla, o porque el usuario dijo "ya tengo un código". */
-    mostrarCampoCodigo: Boolean,
-    errorEnvio: String?,
-    bloqueado: Boolean,
+private fun NipSection(
+    tieneNip: Boolean,
+    nombre: String,
+    nip: String,
+    nuevoNip: String,
+    confirmarNip: String,
+    curp: String,
+    recuperando: Boolean,
     cargando: Boolean,
     mensajeCarga: String?,
-    intentosFallidos: Int,
-    onCorreoChange: (String) -> Unit,
-    onCodigoChange: (String) -> Unit,
-    onEnviarCodigo: () -> Unit,
-    onReenviar: () -> Unit,
-    onTengoCodigo: () -> Unit,
-    onVolver: () -> Unit,
-    onVerificar: () -> Unit,
-    onVolverInicio: () -> Unit
+    error: String?,
+    mensaje: String?,
+    onNipChange: (String) -> Unit,
+    onNuevoNipChange: (String) -> Unit,
+    onConfirmarNipChange: (String) -> Unit,
+    onCurpChange: (String) -> Unit,
+    onEntrar: () -> Unit,
+    onRecuperar: () -> Unit,
+    onEnviarCurp: () -> Unit,
+    onVolver: () -> Unit
 ) {
-    if (bloqueado) {
-        Text(
-            text = "Demasiados intentos fallidos.\nVuelve a iniciar sesión.",
-            fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.error,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(20.dp))
-        OutlinedButton(onClick = onVolverInicio, modifier = Modifier.fillMaxWidth()) {
-            Text("Volver al inicio")
-        }
-        return
-    }
-
     TextButton(onClick = onVolver, contentPadding = PaddingValues(0.dp)) {
         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null,
             modifier = Modifier.size(16.dp), tint = TextMuted)
@@ -469,142 +291,122 @@ private fun VerificacionSection(
     }
 
     Text(
-        text = "Verificación 2FA",
+        text = if (tieneNip) "NIP del SIIA" else "Crea tu NIP del SIIA",
         fontSize = 22.sp,
         fontWeight = FontWeight.Bold,
         color = GreenPrimary,
         modifier = Modifier.padding(top = 4.dp)
     )
-    // Flujo SIIA: el correo ya está en la BD — no se permite editar
-    val esFlujoSiia = correoEnmascaradoSiia.isNotBlank()
+    Text(
+        text = buildString {
+            if (nombre.isNotBlank()) append("Hola, ${nombre.trim().split(" ").first()}. ")
+            append(
+                if (tieneNip) "Escribe el NIP de 4 dígitos que usas en el SIIA."
+                else "El SIIA ahora pide un NIP de 4 dígitos. Créalo una sola vez: te servirá aquí y en el SIIA."
+            )
+        },
+        fontSize = 13.sp,
+        color = TextMuted,
+        modifier = Modifier.padding(top = 2.dp, bottom = 14.dp)
+    )
 
-    if (esFlujoSiia) {
-        Text(
-            text = "Se enviará un código al correo: $correoEnmascaradoSiia",
-            fontSize = 13.sp,
-            color = TextMuted,
-            modifier = Modifier.padding(top = 2.dp, bottom = 14.dp)
+    if (tieneNip) {
+        LoginField(
+            label = "NIP",
+            value = nip,
+            onValueChange = onNipChange,
+            placeholder = "••••",
+            icon = Icons.Default.Pin,
+            keyboardType = KeyboardType.NumberPassword,
+            isPassword = true
         )
     } else {
-        Text(
-            text = "Te enviaremos un código a tu correo",
-            fontSize = 13.sp,
-            color = TextMuted,
-            modifier = Modifier.padding(top = 2.dp, bottom = 14.dp)
-        )
         LoginField(
-            label = "Correo electrónico",
-            value = correoOtp,
-            onValueChange = onCorreoChange,
-            placeholder = "tu@correo.com",
-            icon = Icons.Default.Email,
-            keyboardType = KeyboardType.Email
-        )
-        Spacer(modifier = Modifier.height(10.dp))
-    }
-
-    OutlinedButton(
-        onClick = onEnviarCodigo,
-        enabled = !cargando,
-        modifier = Modifier.fillMaxWidth().height(42.dp),
-        shape = RoundedCornerShape(12.dp),
-        colors = ButtonDefaults.outlinedButtonColors(contentColor = GreenSecondary),
-        border = ButtonDefaults.outlinedButtonBorder.copy(width = 1.5.dp)
-    ) {
-        if (cargando && !correoEnviado) {
-            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(mensajeCarga ?: "Enviando…")
-        } else {
-            Text(if (correoEnviado) "Reenviar código" else "Enviar código", fontWeight = FontWeight.SemiBold)
-        }
-    }
-
-    if (!mostrarCampoCodigo) {
-        TextButton(
-            onClick = onTengoCodigo,
-            contentPadding = PaddingValues(0.dp),
-            modifier = Modifier.padding(top = 6.dp)
-        ) {
-            Text("Ya tengo un código", color = GreenSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-        }
-    }
-
-    if (mostrarCampoCodigo) {
-        Spacer(modifier = Modifier.height(10.dp))
-        LoginField(
-            label = "Código de 6 dígitos",
-            value = codigo2FA,
-            onValueChange = onCodigoChange,
-            placeholder = "000000",
+            label = "Nuevo NIP",
+            value = nuevoNip,
+            onValueChange = onNuevoNipChange,
+            placeholder = "4 dígitos",
             icon = Icons.Default.Pin,
-            keyboardType = KeyboardType.NumberPassword
+            keyboardType = KeyboardType.NumberPassword,
+            isPassword = true
         )
+        Spacer(modifier = Modifier.height(10.dp))
+        LoginField(
+            label = "Confirma tu NIP",
+            value = confirmarNip,
+            onValueChange = onConfirmarNipChange,
+            placeholder = "4 dígitos",
+            icon = Icons.Default.Pin,
+            keyboardType = KeyboardType.NumberPassword,
+            isPassword = true
+        )
+    }
 
-        if (intentosFallidos > 0) {
-            Spacer(modifier = Modifier.height(4.dp))
+    Spacer(modifier = Modifier.height(14.dp))
+    Button(
+        onClick = onEntrar,
+        enabled = !cargando,
+        modifier = Modifier.fillMaxWidth().height(46.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = LoginGreenBright)
+    ) {
+        if (cargando && !recuperando) {
+            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = OnPrimaryWhite)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(mensajeCarga ?: "Verificando…")
+        } else {
+            Text(if (tieneNip) "Entrar" else "Crear NIP y entrar", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+
+    if (tieneNip) {
+        TextButton(onClick = onRecuperar, contentPadding = PaddingValues(0.dp), modifier = Modifier.padding(top = 6.dp)) {
             Text(
-                text = "Intentos fallidos: $intentosFallidos",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.error
+                if (recuperando) "Ya recordé mi NIP" else "¿Olvidaste tu NIP?",
+                color = GreenSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium
             )
         }
-
-        Spacer(modifier = Modifier.height(12.dp))
-        Button(
-            onClick = onVerificar,
-            enabled = !cargando,
-            modifier = Modifier.fillMaxWidth().height(46.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = LoginGreenBright)
-        ) {
-            Text("Verificar e Ingresar", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        if (recuperando) {
+            Text(
+                text = "Escribe tu CURP y el SIIA te enviará tu NIP a tu correo institucional.",
+                fontSize = 12.sp,
+                color = TextMuted,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            LoginField(
+                label = "CURP",
+                value = curp,
+                onValueChange = onCurpChange,
+                placeholder = "18 caracteres",
+                icon = Icons.Default.Badge
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = onEnviarCurp,
+                enabled = !cargando,
+                modifier = Modifier.fillMaxWidth().height(42.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = GreenSecondary),
+                border = ButtonDefaults.outlinedButtonBorder.copy(width = 1.5.dp)
+            ) {
+                Text(if (cargando) (mensajeCarga ?: "Enviando…") else "Enviar NIP a mi correo", fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 
-    if (errorEnvio != null) {
+    if (mensaje != null) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(text = mensaje, fontSize = 12.sp, color = GreenPrimary, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+    }
+    if (error != null) {
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = errorEnvio,
+            text = error,
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.error,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth()
         )
-    }
-}
-
-
-@Composable
-private fun CuentaPendienteSection(
-    nombre: String,
-    onVolver: () -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = "Cuenta pendiente de activación",
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            color = GreenPrimary,
-            textAlign = TextAlign.Center
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(
-            text = "Hola${if (nombre.isNotBlank()) ", $nombre" else ""}. Tu cuenta del SIIA fue reconocida, " +
-                "pero tu carrera aún no está mapeada en AppTESCHI. " +
-                "Comunícate con el administrador escolar para activarla.",
-            fontSize = 14.sp,
-            color = TextMuted,
-            textAlign = TextAlign.Center,
-            lineHeight = 20.sp
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-        OutlinedButton(onClick = onVolver, modifier = Modifier.fillMaxWidth()) {
-            Text("Volver al inicio de sesión")
-        }
     }
 }
 
@@ -671,11 +473,7 @@ private fun LoginField(
 }
 
 @Composable
-private fun LoginBrandingFooter(
-    onRegistrarse: () -> Unit,
-    servidor: String? = null,
-    onServidorClick: () -> Unit = {}
-) {
+private fun LoginBrandingFooter() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -683,18 +481,13 @@ private fun LoginBrandingFooter(
             .padding(horizontal = 20.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
+        Image(
+            painter = painterResource(R.drawable.logo_appteschi),
+            contentDescription = "Logo TESCHI",
             modifier = Modifier
-                .background(LoginGreenDark, RoundedCornerShape(8.dp))
-                .padding(horizontal = 16.dp, vertical = 5.dp)
-        ) {
-            Text(
-                text = "TESChi",
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                color = OnPrimaryWhite
-            )
-        }
+                .size(72.dp)
+                .shadow(6.dp, RoundedCornerShape(16.dp))
+        )
 
         Spacer(modifier = Modifier.height(8.dp))
         Text(
@@ -716,24 +509,11 @@ private fun LoginBrandingFooter(
         Spacer(modifier = Modifier.height(10.dp))
 
         Text(
-            text = "¿NO TIENES UNA CUENTA?",
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium,
-            color = OnPrimaryWhite.copy(alpha = 0.85f),
-            letterSpacing = 1.sp
+            text = "Usa la misma cuenta y el mismo NIP que en el SIIA.",
+            fontSize = 12.sp,
+            color = OnPrimaryWhite,
+            textAlign = TextAlign.Center
         )
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedButton(
-            onClick = onRegistrarse,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(42.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = OnPrimaryWhite),
-            border = BorderStroke(1.5.dp, OnPrimaryWhite)
-        ) {
-            Text("Registrarse", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-        }
 
         Spacer(modifier = Modifier.height(10.dp))
         Text(
@@ -749,18 +529,11 @@ private fun LoginBrandingFooter(
             color = OnPrimaryWhite.copy(alpha = 0.8f),
             modifier = Modifier.padding(top = 2.dp)
         )
-        if (servidor != null) {
-            Text(
-                text = "⚙ Servidor: $servidor",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                color = OnPrimaryWhite,
-                modifier = Modifier
-                    .padding(top = 6.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable(role = Role.Button, onClick = onServidorClick)
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
-            )
-        }
+        Text(
+            text = "v${BuildConfig.VERSION_NAME} · compilada ${BuildConfig.FECHA_COMPILACION}",
+            fontSize = 10.sp,
+            color = OnPrimaryWhite.copy(alpha = 0.8f),
+            modifier = Modifier.padding(top = 2.dp)
+        )
     }
 }

@@ -1,119 +1,61 @@
-# Módulo de Autenticación y 2FA
+# Autenticación: contraseña + NIP del SIIA
 
-- **Estado:** ✅ Integrado y real — **actualizado 15/09/2026 (DEC-026): el SIIA ya no forma parte del login.** Todo lo de abajo sobre `SiiaAuthService`/scraping del SIIA es histórico — se retiró por completo a petición explícita del alumno ("no quiero que dependa del SIIA mi aplicación"). El login ahora solo tiene dos fuentes: bypass de prueba (debug) y cuenta propia de AppTESCHI.
-- **Actualización 18/09/2026 (DEC-030):** el OTP ya no se puede pedir ni verificar sin haber validado la contraseña: `/api/auth/*` emite un ticket de 10 min que `/api/otp/*` exige, y al verificar el OTP el alumno también recibe un token de sesión propio (antes solo el administrador). Ver DEC-030 en [[DECISIONES_TECNICAS]].
-- **Ruta en App:** `Routes.LOGIN`
-- **Relacionado con:** [[MAPA_PROYECTO]], [[REGLAS_PROYECTO]], [[05_RecuperarPassword]]
-
----
-
-## Arquitectura Real de Sesión (histórico — ya no aplica, ver nota de Estado arriba)
-
-> ⚠️ El SIIA **no expone una API REST**. Utiliza **ASP.NET Web Forms** con sesiones por Cookie.
-> No hay JWT ni Refresh Token. La app debe simular un navegador.
-
-| Elemento               | Valor / Descripción                                        |
-|------------------------|------------------------------------------------------------|
-| URL base               | `http://148.230.236.166/Teschi/`                          |
-| Gestión de sesión      | Cookie `ASP.NET_SessionId`                                 |
-| Anti-CSRF              | `__VIEWSTATE` + `__EVENTVALIDATION` (campos ocultos HTML)  |
-| Autenticación          | POST al formulario de login del portal ASP.NET             |
-| Parsing de respuesta   | Web Scraping del HTML con **Jsoup**                        |
-| Librería HTTP          | **OkHttp** (gestión manual de cookies con `CookieJar`)     |
+- **Estado:** ✅ Directo contra la API oficial del SIIA desde el 12/10/2026 (DEC-043), sin backend propio. Reescrita ese día: el flujo anterior (cuenta propia, administrador, ticket + código por correo y el login del SIIA pasando por `AppTeschi.Api`) está en DEC-019, DEC-020, DEC-030, DEC-035 y DEC-041, y en el historial de git.
+- **Ruta en la app:** `Routes.LOGIN`
+- **Relacionado con:** [[API_SIIA_Oficial]], [[09_Login_SIIA_por_Tipo]], [[DECISIONES_TECNICAS]] (DEC-041, DEC-043)
 
 ---
 
-## Flujo Técnico Completo
+## Quién puede entrar
+
+Solo alumnos del SIIA (`tipo = E`), con su usuario (matrícula), su contraseña del SIIA y su NIP de 4 dígitos. Docentes (`P`) y administrativos (`A`) ven "Por ahora AppTESCHI es solo para alumnos…". Ya no hay cuentas propias, administradores, registro ni usuarios de prueba.
+
+## Flujo
 
 ```
-[Paso 1 — GET página de login]
-  GET http://148.230.236.166/Teschi/Login.aspx
-  → Parsear HTML: extraer __VIEWSTATE, __EVENTVALIDATION
-       │
-       ▼
-[Paso 2 — POST credenciales al SIIA]
-  POST http://148.230.236.166/Teschi/default.aspx?ReturnUrl=%2fTeschi%2fLogin.aspx
-  Campos: txtUsuario (matrícula), txtPass, btnAceptar=Iniciar Sesión
-       │
-       ├─ Respuesta con alert('los datos son errores') → Credenciales inválidas (no avanza)
-       └─ Redirección / página interior → Credenciales válidas
-              │
-              ▼
-[Paso 3 — 2FA: Generación y envío de OTP]
-  App genera código OTP de 6 dígitos (aleatorio local)
-  App envía OTP al correo indicado por el usuario (cualquier dominio — temporal)
-       │
-       ▼
-[Paso 4 — Verificación OTP]
-  Usuario ingresa código
-  App valida contra el valor generado en memoria
-  ┌─ Sin límite de expiración por tiempo ──────────────┐
-  │  Botón "Reenviar código" genera un nuevo OTP       │
-  │  y reemplaza el anterior en memoria                │
-  └────────────────────────────────────────────────────┘
-  Intentos fallidos: contador preparado (umbral configurable,
-  actualmente sin bloqueo — ver INTENTOS_MAX en AuthViewModel)
-       │
-       ▼
-[Paso 5 — Auditoría]
-  App captura: Coordenadas GPS + IP del dispositivo
-  POST {URL_AUDITORIA} — endpoint pendiente de recibir de TI
-       │
-       ▼
-[Paso 6 — Sesión activa]
-  Cookie ASP.NET_SessionId persiste en CookieJar durante la sesión
-  Navegar a Dashboard
+usuario + contraseña ─► SIIA POST login.ashx ─► { requiereNip, tieneNip, tempToken (10 min), usuario? }
+                                                    │
+NIP (o crear NIP)    ─► SIIA POST nip.ashx  ─► { token (480 min), usuarioInfo }
+   accion: verificar | configurar                   │
+                                                    ▼
+                         UserSession: token + vencimiento + datos de la cuenta ─► Inicio
 ```
 
----
+- **Tiene NIP:** la app pide "NIP del SIIA". **No tiene:** pide crearlo (nuevo + confirmación) con `configurar`; sirve también en el portal del SIIA.
+- **"¿Olvidaste tu NIP?":** CURP → `nip.ashx` con `accion: recuperar`. El SIIA manda el NIP al correo institucional; la app muestra el correo enmascarado solo si la CURP es de quien está entrando.
+- Si el paso 1 ya trae `usuario` con un tipo que no es alumno, se rechaza antes del NIP. Si no lo trae, se revisa con `usuarioInfo` del paso NIP.
+- Si el SIIA diera el token sin pedir NIP, se entra directo.
+- Los límites de intentos los pone el SIIA (429 con su mensaje).
 
-## Campos del Formulario ASP.NET (a confirmar con inspección real)
+## Sesión
 
-| Campo              | Tipo   | Descripción                                    |
-|--------------------|--------|------------------------------------------------|
-| `__VIEWSTATE`      | Hidden | Estado del formulario (extraer del HTML)       |
-| `__EVENTVALIDATION`| Hidden | Token anti-CSRF (extraer del HTML)             |
-| `__VIEWSTATEGENERATOR` | Hidden | Generador de viewstate (extraer del HTML)  |
-| `txtUsuario`       | Text   | Matrícula o usuario SIIA ✅ confirmado         |
-| `txtPass`          | Password | Contraseña SIIA ✅ confirmado                |
-| `btnAceptar`       | Submit | Valor: `Iniciar Sesión` ✅ confirmado          |
+- `UserSession` guarda el token final del SIIA, cuándo vence (480 min, con 1 min de margen) y los datos de la cuenta (`usuario`, `numUsuario`, `nombreCompleto`, `correo`, `area` como carrera, `idCarrera`).
+- Está en SharedPreferences `appteschi_sesion`, **excluidas** del respaldo en la nube y de la copia entre teléfonos (`res/xml/backup_rules.xml`, `data_extraction_rules.xml`).
+- Con el token vigente la app abre directo en Inicio.
+- Si una consulta con el token recibe 401, `SesionAlumno` borra la sesión y la app muestra "Tu sesión del SIIA expiró" y manda al login.
+- "Cerrar sesión" (Perfil) borra todo del teléfono.
+- La contraseña y el NIP **nunca se guardan**; el `tempToken` solo vive en memoria durante el paso NIP.
 
-> ✅ Campos confirmados inspeccionando `Login.aspx` el 27/08/2026.
-> Error de credenciales inválidas: `alert('los datos son errores')` en la respuesta HTML.
+## Cambiar el NIP
 
----
+Desde Perfil: NIP actual + nuevo + confirmación → `nip.ashx` con `accion: cambiar` y `Authorization: Bearer <token>`. Aquí un 401 puede ser "NIP actual incorrecto", así que **no** cierra la sesión.
 
-## Dependencias Requeridas en `build.gradle.kts`
+## Contraseña
 
-```kotlin
-// Ya incluidas vía TOML:
-implementation(libs.okhttp.logging.interceptor)  // OkHttp
+Es la del SIIA: se cambia y se recupera en el portal del SIIA. La app solo lo indica con un texto.
 
-// Añadir:
-implementation("org.jsoup:jsoup:1.18.1")         // Parsing HTML
-```
+## Archivos
 
----
+| Capa | Archivos |
+|---|---|
+| UI | `ui/login/LoginScreen.kt` (`CredencialesSection`, `NipSection`) |
+| Estado | `viewmodel/AuthViewModel.kt` (`validarCredenciales`, `verificarNip`, `crearNip`, `recuperarNip`) |
+| Datos | `data/repository/AuthRepository.kt`, `data/UserSession.kt`, `data/CuentaSiia.kt` |
+| Red | `service/SiiaAuthService.kt` (`SiiaHttpAuthService`), `service/AlumnoAuthHeader.kt` (`SesionAlumno`), `core/config/ApiConfig.kt` (`SiiaEndpoints`) |
+| Pruebas | `SiiaHttpAuthServiceTest` (SIIA simulado), `AuthRepositoryTest`, `AuthViewModelTest`, `UserSessionTest` |
 
-## Estado Actual en el Código
+## Diseño visual del login
 
-| Elemento                    | Estado                                             |
-|-----------------------------|----------------------------------------------------|
-| UI Login + 2FA              | ✅ Implementada en `MainActivity.kt`               |
-| Botón "Reenviar código"     | ✅ Implementado en `MainActivity.kt`               |
-| Contador de intentos fallidos | ✅ Preparado (`maxIntentos` configurable, sin bloqueo activo) |
-| GET + POST al SIIA (scraping) | ✅ `SiiaAuthService.kt` — valida matrícula/contraseña |
-| CookieJar para sesión ASP.NET | ✅ `InMemoryCookieJar.kt` (solo login por ahora)  |
-| AuthViewModel               | ✅ `AuthViewModel.kt` — orquesta SIIA + OTP        |
-| Envío de correo con OTP     | ✅ `EmailOtpService.kt` — cualquier correo (temporal) |
-| Captura GPS                 | ⚠️ Pendiente — TODO en `LoginScreen`             |
-| Endpoint de Auditoría       | ⚠️ Pendiente — URL por recibir de TI             |
-
----
-
-## Reglas de Seguridad
-
-- La Cookie `ASP.NET_SessionId` se almacena solo en memoria (`CookieJar` en RAM), no en disco.
-- El OTP generado vive solo en `AuthViewModel` (memoria de la app), nunca en logs ni preferencias.
-- El campo OTP usa `KeyboardType.NumberPassword` (sin sugerencias del sistema).
-- Bloqueo por intentos: constante `INTENTOS_MAX = 5` lista en `AuthViewModel`; activar con un solo flag cuando se decida.
+- Tarjeta blanca con el formulario (usuario + contraseña, luego NIP) y sección verde inferior con el logo, "¡Bienvenido!", "Usa la misma cuenta y el mismo NIP que en el SIIA." y la versión con fecha de compilación.
+- Colores de `ui/theme/Color.kt` (`LoginInk`, `LoginFieldBg`, `LoginGreenBright`…), nunca hex sueltos.
+- Desplazamiento vertical para celulares pequeños; respeta barras del sistema y teclado.
