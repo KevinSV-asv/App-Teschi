@@ -21,6 +21,8 @@
 
 - [x] **Foto de perfil** (DEC-048): se elige de la galería y solo se guarda en el teléfono, porque la API no permite subirla. Se quitó la insignia "SIIA · Sesión activa". **155/155** pruebas. App **2.4**.
 
+- [x] **Publicación en `main` para el profesor:** README principal; se quitaron del repositorio el enlace roto `App Teschi` y `instalar-skills-claude-code.ps1` (sigue en la PC); la matrícula de ejemplo de dos Word se cambió por la ficticia. Se borraron las ramas de trabajo.
+
 ## Sin cambios, a propósito
 
 - **Login:** sigue con contraseña + NIP (DEC-043). `login-nip.ashx` no se usa.
@@ -30,6 +32,7 @@
 
 ## Pendiente
 
+- [ ] Decidir si se limpia el historial público: versiones anteriores de dos Word (`12 - Documentacion de Base de Datos`, `19 - Glosario`) conservan una matrícula real usada como ejemplo. Reescribirlo requiere `git push --force`: es decisión del dueño.
 - [ ] Correr la colección de Postman con una cuenta real y revisar **Test Results**: la forma real de las respuestas aún no se ha visto.
 - [ ] Pedir a la escuela endpoints para **cambiar la contraseña**, reinscripción e intersemestrales.
 - [ ] Probar el cambio de NIP con una cuenta real (comprobar que `login.ashx` no invalide la sesión).

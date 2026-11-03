@@ -45,3 +45,5 @@ Cerebro_AppEscolar/.opencode/
 Cerebro_AppEscolar/.agents/
 Cerebro_AppEscolar/.claude/
 Cerebro_AppEscolar/.copilot/
+*.code-workspace
+/instalar-skills-claude-code.ps1
